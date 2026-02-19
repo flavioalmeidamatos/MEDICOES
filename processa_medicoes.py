@@ -5,9 +5,11 @@ from openpyxl.utils import get_column_letter
 from datetime import datetime
 import os
 import re
+from typing import Dict, List, Any, Optional, Union
+from decimal import Decimal, ROUND_HALF_UP
 
 # Caminhos dos arquivos
-CWD = r"d:\APRENDIZADO APP\MEDIÇÕES"
+CWD = os.path.dirname(os.path.abspath(__file__))
 FILE_BASE = os.path.join(CWD, "BASE.xlsx")
 FILE_ANALITICA = os.path.join(CWD, "ANALITICA.xlsx")
 FILE_AUXILIAR = os.path.join(CWD, "AUXILIAR.xlsx")
@@ -18,18 +20,19 @@ def clean_sei(val):
     if pd.isna(val): return ""
     return str(val).strip()
 
-def to_numeric(val):
+def to_numeric(val: Any) -> float:
     if pd.isna(val): return 0.0
     if isinstance(val, (int, float)): return float(val)
     # Remove R$, espaços, pontos de milhar, troca vírgula por ponto
     s = str(val).replace("R$", "").replace("\xa0", "").replace(" ", "")
-    # Se houver pontos e vírgulas, assume que ponto é milhar e vírgula é decimal
     if "," in s and "." in s:
         s = s.replace(".", "").replace(",", ".")
     elif "," in s:
         s = s.replace(",", ".")
     try:
-        return round(float(s), 2)
+        # Usar Decimal para arredondamento preciso e evitar problemas de overload do linter
+        d = Decimal(s).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)
+        return float(d)
     except:
         return 0.0
 
@@ -73,9 +76,9 @@ def get_contractor_mapping():
                 mapping[orig] = res
     return mapping
 
-def get_comissoes_data():
+def get_comissoes_data() -> Dict[str, Dict[str, str]]:
     xl = pd.ExcelFile(FILE_COMISSOES)
-    data = {}
+    data: Dict[str, Dict[str, str]] = {}
     
     # 1. Lê a aba AUXILIAR para mapear SEI -> STATUS, GESTOR e LOCAL
     aux_sheet = next((s for s in xl.sheet_names if s.upper() == "AUXILIAR"), None)
@@ -120,19 +123,20 @@ def get_comissoes_data():
         
         if sei_idx is not None:
             for i in range(start_row, len(df)):
-                row = df.iloc[i]
-                sei = clean_sei(row[sei_idx])
+                row_data = df.iloc[i]
+                sei = clean_sei(row_data[sei_idx])
                 if not sei or sei.upper() == "NAN": continue
                 
-                gestor = str(row[gestor_idx]).strip() if gestor_idx is not None and pd.notna(row[gestor_idx]) else ""
+                gestor = str(row_data[gestor_idx]).strip() if gestor_idx is not None and pd.notna(row_data[gestor_idx]) else ""
                 
                 if sei not in data:
                     data[sei] = {'gestor': gestor, 'local': local_val, 'status_aux': ''}
                 else:
-                    # Se já existe (pela AUXILIAR), atualiza o LOCAL se o da aba for mais específico
-                    data[sei]['local'] = local_val
-                    if gestor and not data[sei]['gestor']:
-                        data[sei]['gestor'] = gestor
+                    item_ref: Optional[Dict[str, str]] = data.get(sei)
+                    if item_ref is not None:
+                        item_ref['local'] = local_val
+                        if gestor and not item_ref.get('gestor'):
+                            item_ref['gestor'] = gestor
     return data
 
 def apply_sheet_formatting(ws, col_map, header, all_months, model_widths, model_header_style,
@@ -208,10 +212,12 @@ def apply_sheet_formatting(ws, col_map, header, all_months, model_widths, model_
             cell.number_format = money_fmt
             try:
                 if cell.value is not None:
-                    val_clean = str(cell.value).replace('R$', '').replace(' ', '')
-                    if ',' in val_clean and '.' not in val_clean:
-                        val_clean = val_clean.replace(',', '.')
-                    cell.value = round(float(val_clean), 2)
+                    val_str = str(cell.value).replace('R$', '').replace(' ', '')
+                    if ',' in val_str and '.' not in val_str:
+                        val_str = val_str.replace(',', '.')
+                    # Usar Decimal aqui também
+                    d_val = Decimal(val_str).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)
+                    cell.value = float(d_val)
                 else:
                     cell.value = 0.0
             except:
@@ -290,8 +296,21 @@ def main():
     df_base['Valor'] = df_base['Valor das medições'].apply(to_numeric)
 
     # Mapeamento de meses para string JAN/21
-    meses_pt = {1: "JAN", 2: "FEV", 3: "MAR", 4: "ABR", 5: "MAI", 6: "JUN", 7: "JUL", 8: "AGO", 9: "SET", 10: "OUT", 11: "NOV", 12: "DEZ"}
-    df_base['MesAno'] = df_base.apply(lambda r: f"{meses_pt[r['Mês']]}/{str(r['Ano'])[2:]}", axis=1)
+    meses_pt: Dict[int, str] = {1: "JAN", 2: "FEV", 3: "MAR", 4: "ABR", 5: "MAI", 6: "JUN", 7: "JUL", 8: "AGO", 9: "SET", 10: "OUT", 11: "NOV", 12: "DEZ"}
+    def format_mes_ano(r: Any) -> str:
+        ano_val = str(r['Ano'])
+        ano_s = str(ano_val)
+        
+        # Linter-friendly suffix extraction
+        suffix = ano_s
+        if len(ano_s) >= 2:
+             # Manual substring to avoid slice type confusion
+             suffix = ano_s[len(ano_s)-2] + ano_s[len(ano_s)-1]
+        
+        mes_val: int = int(r['Mês'])
+        mes_str = meses_pt.get(mes_val, "JAN")
+        return f"{mes_str}/{suffix}"
+    df_base['MesAno'] = df_base.apply(format_mes_ano, axis=1)
 
     # Pivotar: Index SEI, Columns MesAno, Values Valor
     df_pivot = df_base.pivot_table(index='SEI_CLEAN', columns='MesAno', values='Valor', aggfunc='sum').fillna(0)
@@ -300,9 +319,9 @@ def main():
     final_rows = []
     gestores_faltantes = []
 
-    # Ordenar colunas de meses (JAN/21 a DEZ/25)
+    # Ordenar colunas de meses (JAN/21 a DEZ/26)
     all_months = []
-    for ano in range(21, 26):
+    for ano in range(21, 27):
         for mes in range(1, 13):
             all_months.append(f"{meses_pt[mes]}/{str(ano)}")
 
@@ -333,16 +352,17 @@ def main():
 
         vlr_contrato = to_numeric(row['Valor contrato (Atual)'])
 
-        med_months = {}
+        med_months: Dict[str, float] = {}
         for m in all_months:
-            val = df_pivot.loc[sei, m] if sei in df_pivot.index and m in df_pivot.columns else 0.0
-            med_months[m] = round(val, 2)
+            m_raw = df_pivot.loc[sei, m] if (sei in df_pivot.index and m in df_pivot.columns) else 0.0
+            med_months[m] = float(Decimal(float(m_raw)).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP))
 
-        med_2025 = sum(med_months.get(f"{meses_pt[m]}/25", 0.0) for m in range(1, 13))
-        med_acumulada = sum(med_months.values())
+        med_2025 = float(sum([float(med_months.get(f"{meses_pt.get(mx)}/25", 0.0)) for mx in range(1, 13)]))
+        med_2026 = float(sum([float(med_months.get(f"{meses_pt.get(mx)}/26", 0.0)) for mx in range(1, 13)]))
+        med_acumulada = float(sum([float(vx) for vx in med_months.values()]))
 
-        perc_exec = med_acumulada / vlr_contrato if vlr_contrato > 0 else 0.0
-        saldo = vlr_contrato - med_acumulada
+        perc_exec = float(med_acumulada / vlr_contrato) if vlr_contrato > 0.0 else 0.0
+        saldo = float(vlr_contrato - med_acumulada)
         # Contratada (Substituir pelo Resumido se houver match)
         fullname = str(row['Contratada']).strip()
         norm_name = normalize_name(fullname)
@@ -361,10 +381,11 @@ def main():
             "REGIÃO": regiao,
             "MUNICIPIO": row['Municipio'],
             "CONTRATADA": contratada_final,
-            "MEDIÇÕES 2025": round(med_2025, 2),
-            h_med_acum: round(med_acumulada, 2),
+            "MEDIÇÕES 2025": float(Decimal(med_2025).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)),
+            "MEDIÇÕES 2026": float(Decimal(med_2026).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)),
+            h_med_acum: float(Decimal(med_acumulada).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)),
             "% EXEC.": perc_exec,
-            h_saldo: round(saldo, 2)
+            h_saldo: float(Decimal(saldo).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP))
         }
         linha.update(med_months)
         final_rows.append(linha)
