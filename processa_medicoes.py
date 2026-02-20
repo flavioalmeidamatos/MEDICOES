@@ -289,27 +289,38 @@ def apply_sheet_formatting(ws, col_map, header, all_months, model_widths, model_
             is_money = True
         
         if is_money:
-            # Aumentado para 25 para dar folga extra e evitar qualquer #### 
-            # mesmo com valores muito altos e formatação R$
-            width = max(width, 25)
+            # Mantemos 20 para meses normais, mas permitimos exceções abaixo
+            width = max(width, 20)
         
         # 2. Date Columns
-        if any(k in val_header.upper() for k in ["DATA", "INÍCIO", "FINAL", "PRAZO"]):
-            width = max(width, 16)
+        if any(k in val_header.upper() for k in ["DATA", "INÍCIO", "FINAL"]):
+            width = max(width, 12)
             
-        # 3. Specific Columns
-        if val_header == "SEI":
-            width = max(width, 24)
+        # 3. Specific Columns (Refinamento conforme pedido)
+        if val_header == "Nº":
+            width = 4
+        elif val_header == "SEI":
+            width = 19
+        elif "PRAZO" in val_header.upper():
+            width = 11
+        elif val_header == "VLR.CONTRATO C/ADITIVO":
+            width = 18
         elif val_header == "GESTOR":
-            width = min(max(width, 25), 35)
+            width = 19
+        elif val_header == "MEDIÇÕES 2025":
+            width = 18
+        elif val_header == "MEDIÇÕES 2026":
+            width = 18
+        elif val_header == "MEDIÇÕES ACUMULADAS":
+            width = 18
+        elif val_header == "SALDO DO CONTRATO":
+            width = 18
         elif val_header == "MUNICIPIO":
-            width = min(max(width, 18), 25)
+            width = min(max(width, 15), 22)
         elif val_header == "CONTRATADA":
-            width = max(width, 22)
-        elif val_header == "Nº":
-            width = 6
+            width = max(width, 18)
         elif "%" in val_header:
-            width = 12
+            width = 8
             
         ws.column_dimensions[column_letter].width = width
 
