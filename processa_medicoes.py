@@ -293,22 +293,47 @@ def main():
     # 3. Carregar BASE (Lançamentos) e pivotar
     df_base = pd.read_excel(FILE_BASE)
     df_base['SEI_CLEAN'] = df_base['Processo SEI'].apply(clean_sei)
-    df_base['Valor'] = df_base['Valor das medições'].apply(to_numeric)
+    # Suporte ao novo formato BASE.xlsx (coluna 'Valor') e ao formato antigo ('Valor das medições')
+    if 'Valor' in df_base.columns:
+        df_base['Valor'] = df_base['Valor'].apply(to_numeric)
+    elif 'Valor das medições' in df_base.columns:
+        df_base['Valor'] = df_base['Valor das medições'].apply(to_numeric)
+    else:
+        raise KeyError("Coluna de valor não encontrada no BASE.xlsx. Esperado: 'Valor' ou 'Valor das medições'.")
 
     # Mapeamento de meses para string JAN/21
     meses_pt: Dict[int, str] = {1: "JAN", 2: "FEV", 3: "MAR", 4: "ABR", 5: "MAI", 6: "JUN", 7: "JUL", 8: "AGO", 9: "SET", 10: "OUT", 11: "NOV", 12: "DEZ"}
+    # Mapeamento de nomes completos em português para abreviação
+    meses_nome_pt: Dict[str, str] = {
+        "JANEIRO": "JAN", "FEVEREIRO": "FEV", "MARÇO": "MAR", "MARCO": "MAR",
+        "ABRIL": "ABR", "MAIO": "MAI", "JUNHO": "JUN", "JULHO": "JUL",
+        "AGOSTO": "AGO", "SETEMBRO": "SET", "OUTUBRO": "OUT",
+        "NOVEMBRO": "NOV", "DEZEMBRO": "DEZ"
+    }
     def format_mes_ano(r: Any) -> str:
         ano_val = str(r['Ano'])
         ano_s = str(ano_val)
-        
+
         # Linter-friendly suffix extraction
         suffix = ano_s
         if len(ano_s) >= 2:
-             # Manual substring to avoid slice type confusion
-             suffix = ano_s[len(ano_s)-2] + ano_s[len(ano_s)-1]
-        
-        mes_val: int = int(r['Mês'])
-        mes_str = meses_pt.get(mes_val, "JAN")
+            # Manual substring to avoid slice type confusion
+            suffix = ano_s[len(ano_s)-2] + ano_s[len(ano_s)-1]
+
+        mes_raw = r['Mês']
+        mes_str = "JAN"
+        if pd.notna(mes_raw):
+            mes_val_s = str(mes_raw).strip().upper()
+            # Tenta interpretar como nome completo (ex: "JANEIRO")
+            if mes_val_s in meses_nome_pt:
+                mes_str = meses_nome_pt[mes_val_s]
+            else:
+                # Fallback: tenta interpretar como número (ex: 1, 2, ..., 12)
+                try:
+                    mes_num: int = int(float(mes_val_s))
+                    mes_str = meses_pt.get(mes_num, "JAN")
+                except (ValueError, TypeError):
+                    mes_str = "JAN"
         return f"{mes_str}/{suffix}"
     df_base['MesAno'] = df_base.apply(format_mes_ano, axis=1)
 
