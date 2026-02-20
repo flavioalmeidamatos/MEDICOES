@@ -106,138 +106,194 @@ def generate_report(df):
         print("No data found to generate report.")
         return
 
-    # Filter/Clean Data
-    # Ensure we have relevant fields
-    # Standardize names
+    # Clean Data
     df['GESTOR(A) ATUANTE'] = df['GESTOR(A) ATUANTE'].fillna('NÃO DEFINIDO').astype(str).str.strip().str.upper()
     df['FISCAL NOMEADO'] = df['FISCAL NOMEADO'].fillna('NÃO DEFINIDO').astype(str).str.strip().str.upper()
     df['REGIÃO'] = df['REGIÃO'].fillna('SEM REGIÃO').astype(str).str.strip().str.upper()
 
-    # Expand rows where there are multiple fiscals separated by "/"
-    # distinct rows for each fiscal
-    df_expanded = df.assign(FISCAL_INDIVIDUAL=df['FISCAL NOMEADO'].str.split('/')).explode('FISCAL_INDIVIDUAL')
-    df_expanded['FISCAL_INDIVIDUAL'] = df_expanded['FISCAL_INDIVIDUAL'].str.strip()
+    # Separate df into expanded sets taking into account "/" separated multiple people
+    df_f = df.assign(FISCAL_INDIVIDUAL=df['FISCAL NOMEADO'].str.split('/')).explode('FISCAL_INDIVIDUAL')
+    df_f['FISCAL_INDIVIDUAL'] = df_f['FISCAL_INDIVIDUAL'].str.strip()
+    df_f = df_f[~df_f['FISCAL_INDIVIDUAL'].isin(['', 'NAN'])]
+    
+    df_g = df.assign(GESTOR_INDIVIDUAL=df['GESTOR(A) ATUANTE'].str.split('/')).explode('GESTOR_INDIVIDUAL')
+    df_g['GESTOR_INDIVIDUAL'] = df_g['GESTOR_INDIVIDUAL'].str.strip()
+    df_g = df_g[~df_g['GESTOR_INDIVIDUAL'].isin(['', 'NAN'])]
 
-    # Sort: Region -> Fiscal -> Municipio
-    df_sorted = df_expanded.sort_values(by=['REGIÃO', 'FISCAL_INDIVIDUAL', 'MUNICIPIO'])
-    
-    # Columns to show in report
-    # Based on PDF "Report of Works by Managers and Fiscals", likely we want:
-    # Region | Fiscal | SEI | Municipio | Empresa | Status | % Exec | Gestor
-    
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Relatório Obras Gestores Fiscais"
-    
+    ws.title = "Resumo Obras"
+
     # Styles
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid") # Dark Blue
-    
-    region_font = Font(bold=True, size=12, color="000000")
-    region_fill = PatternFill(start_color="BFBFBF", end_color="BFBFBF", fill_type="solid") # Grey
-    
-    fiscal_font = Font(bold=True, italic=True)
-    fiscal_fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid") # Light Blue
+    title_font = Font(bold=True, size=14)
+    header_font = Font(bold=True, size=12)
+    bold_font = Font(bold=True)
     
     thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-    thick_border = Border(left=Side(style='medium'), right=Side(style='medium'), top=Side(style='medium'), bottom=Side(style='medium'))
     
-    # Columns Layout
-    cols = ['SEI', 'MUNICIPIO', 'EMPRESA', 'STATUS', '%EXEC', 'GESTOR(A) ATUANTE']
-    start_row = 1
+    # Title
+    ws.merge_cells("A1:G2")
+    cell = ws.cell(row=1, column=1, value="RELATÓRIO DE OBRAS POR GESTORES E FISCAIS")
+    cell.font = title_font
+    cell.alignment = Alignment(horizontal='center', vertical='center')
     
-    # Main Title
-    # Merge cells for title 
-    title_range = ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(cols))
-    title_cell = ws.cell(row=1, column=1, value="RELATÓRIO DE OBRAS POR GESTORES E FISCAIS")
-    title_cell.font = Font(bold=True, size=14)
-    title_cell.alignment = Alignment(horizontal='center', vertical='center')
+    # Title border
+    for r in range(1, 3):
+        for c in range(1, 8):
+            if c != 4:  # col D is spacing
+                ws.cell(row=r, column=c).border = thin_border
+            
+    current_row = 4
     
-    # Apply border to merged title range
-    # Ideally apply to all cells in range, but usually top-left is enough for content, borders need loop
-    for r in range(1, 2):
-        for c in range(1, len(cols) + 1):
-             ws.cell(row=r, column=c).border = thick_border
-    
-    current_row = 3
-    
-    # Loop through groups: Region -> Fiscal
-    for region, group_r in df_sorted.groupby('REGIÃO'):
-        # Region Header
-        ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=len(cols))
-        cell_r = ws.cell(row=current_row, column=1, value=f"REGIÃO: {region}")
-        cell_r.font = region_font
-        cell_r.fill = region_fill
-        cell_r.alignment = Alignment(horizontal='left')
-        for c in range(1, len(cols) + 1):
-             ws.cell(row=current_row, column=c).border = thin_border
+    regions = df['REGIÃO'].unique()
+    regions = sorted([r for r in regions if r.upper() not in ['NAN', '', 'SEM REGIÃO']])
+    if 'SEM REGIÃO' in df['REGIÃO'].unique():
+        regions.append('SEM REGIÃO')
+        
+    for region in regions:
+        # Get data for region
+        rf = df_f[df_f['REGIÃO'] == region]
+        rg = df_g[df_g['REGIÃO'] == region]
+        
+        # Aggregate Fiscais
+        fiscal_counts = rf['FISCAL_INDIVIDUAL'].value_counts().reset_index()
+        fiscal_counts.columns = ['Nome', 'Count']
+        fiscal_counts = fiscal_counts.sort_values(by='Nome')
+        
+        # Aggregate Gestores
+        gestor_counts = rg['GESTOR_INDIVIDUAL'].value_counts().reset_index()
+        gestor_counts.columns = ['Nome', 'Count']
+        gestor_counts = gestor_counts.sort_values(by='Nome')
+        
+        # Skip if no data
+        if fiscal_counts.empty and gestor_counts.empty:
+            continue
+            
+        # Region Header for Fiscais
+        ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=3)
+        h_f = ws.cell(row=current_row, column=1, value=f"{region} - Obras por FISCAL")
+        h_f.font = header_font
+        h_f.alignment = Alignment(horizontal='center')
+        
+        for c in range(1, 4):
+            ws.cell(row=current_row, column=c).border = thin_border
+            
+        # Region Header for Gestores
+        ws.merge_cells(start_row=current_row, start_column=5, end_row=current_row, end_column=7)
+        h_g = ws.cell(row=current_row, column=5, value=f"{region} - Obras por GESTOR")
+        h_g.font = header_font
+        h_g.alignment = Alignment(horizontal='center')
+        for c in range(5, 8):
+            ws.cell(row=current_row, column=c).border = thin_border
+        
         current_row += 1
         
-        for fiscal, group_f in group_r.groupby('FISCAL_INDIVIDUAL'):
-            if not fiscal: continue
-            
-            # Fiscal Sub-header
-            ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=len(cols))
-            cell_f = ws.cell(row=current_row, column=1, value=f"  FISCAL: {fiscal}")
-            cell_f.font = fiscal_font
-            cell_f.fill = fiscal_fill
-             # Apply border to fiscal header row
-            for c in range(1, len(cols) + 1):
-                ws.cell(row=current_row, column=c).border = thin_border
-            current_row += 1
-            
-            # Column Headers
-            for c_idx, col_name in enumerate(cols, 1):
-                cell = ws.cell(row=current_row, column=c_idx, value=col_name)
-                cell.font = header_font
-                cell.fill = header_fill
-                cell.alignment = Alignment(horizontal='center')
-                cell.border = thin_border
-            current_row += 1
-            
-            # Data Rows
-            for _, row in group_f.iterrows():
-                for c_idx, col_name in enumerate(cols, 1):
-                    val = row.get(col_name, "")
-                    cell = ws.cell(row=current_row, column=c_idx, value=val)
-                    cell.border = thin_border
-                    cell.alignment = Alignment(horizontal='left')
-                    
-                    # Format numbers/percentages
-                    if col_name == '%EXEC':
-                        # Try to format as percentage
-                         try:
-                             # Expected format 25.58% or 0.2558
-                             s_val = str(val).replace('%', '').replace(',', '.')
-                             f_val = float(s_val)
-                             if f_val > 1.05: # Likely 25.58 meaning 25%
-                                 f_val = f_val / 100.0
-                             cell.value = f_val
-                             cell.number_format = '0.00%'
-                         except:
-                             pass
-                current_row += 1
-            
-            current_row += 1 # Spacer between fiscals
+        max_rows = max(len(fiscal_counts), len(gestor_counts))
         
-        current_row += 1 # Spacer between Regions
+        for i in range(max_rows):
+            # Fiscais Columns
+            if i < len(fiscal_counts):
+                f_row = fiscal_counts.iloc[i]
+                ws.cell(row=current_row + i, column=1, value=i+1).border = thin_border
+                ws.cell(row=current_row + i, column=2, value=f_row['Nome']).border = thin_border
+                ws.cell(row=current_row + i, column=3, value=int(f_row['Count'])).border = thin_border
+                
+                # Alignments
+                ws.cell(row=current_row + i, column=1).alignment = Alignment(horizontal='center')
+                ws.cell(row=current_row + i, column=3).alignment = Alignment(horizontal='center')
+            else:
+                # Fill empty cells with border to keep table rectangular
+                for c in range(1, 4):
+                    ws.cell(row=current_row + i, column=c).border = thin_border
+            
+            # Gestores Columns
+            if i < len(gestor_counts):
+                g_row = gestor_counts.iloc[i]
+                ws.cell(row=current_row + i, column=5, value=i+1).border = thin_border
+                ws.cell(row=current_row + i, column=6, value=g_row['Nome']).border = thin_border
+                ws.cell(row=current_row + i, column=7, value=int(g_row['Count'])).border = thin_border
+                
+                ws.cell(row=current_row + i, column=5).alignment = Alignment(horizontal='center')
+                ws.cell(row=current_row + i, column=7).alignment = Alignment(horizontal='center')
+            else:
+                # Fill empty cells with border
+                for c in range(5, 8):
+                    ws.cell(row=current_row + i, column=c).border = thin_border
+                
+        current_row += max_rows
+        
+        current_row += 3  # Add spacing before next region
+        
+    # --- QUADRO RESUMO GERAL ---
+    current_row += 1
+    
+    # Calcular contagem global (ignorando região)
+    overall_fiscal = df_f['FISCAL_INDIVIDUAL'].value_counts().reset_index()
+    overall_fiscal.columns = ['Nome', 'Count']
+    overall_fiscal = overall_fiscal.sort_values(by='Nome')
+    
+    overall_gestor = df_g['GESTOR_INDIVIDUAL'].value_counts().reset_index()
+    overall_gestor.columns = ['Nome', 'Count']
+    overall_gestor = overall_gestor.sort_values(by='Nome')
+    
+    # Headers do Quadro Geral
+    ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=2)
+    h_f = ws.cell(row=current_row, column=1, value="FISCAL")
+    h_f.font = header_font
+    h_f.alignment = Alignment(horizontal='center')
+    ws.cell(row=current_row, column=3, value="OBRAS").font = header_font
+    ws.cell(row=current_row, column=3).alignment = Alignment(horizontal='center')
+    
+    ws.merge_cells(start_row=current_row, start_column=5, end_row=current_row, end_column=6)
+    h_g = ws.cell(row=current_row, column=5, value="GESTOR")
+    h_g.font = header_font
+    h_g.alignment = Alignment(horizontal='center')
+    ws.cell(row=current_row, column=7, value="OBRAS").font = header_font
+    ws.cell(row=current_row, column=7).alignment = Alignment(horizontal='center')
+    
+    for c in list(range(1, 4)) + list(range(5, 8)):
+        ws.cell(row=current_row, column=c).border = thin_border
+        
+    current_row += 1
+    
+    max_overall = max(len(overall_fiscal), len(overall_gestor))
+    
+    for i in range(max_overall):
+        # Lado Esquerdo (Fiscal)
+        ws.merge_cells(start_row=current_row + i, start_column=1, end_row=current_row + i, end_column=2)
+        if i < len(overall_fiscal):
+            f_row = overall_fiscal.iloc[i]
+            c_f = ws.cell(row=current_row + i, column=1, value=f_row['Nome'])
+            c_f.alignment = Alignment(horizontal='left')
+            ws.cell(row=current_row + i, column=3, value=int(f_row['Count'])).alignment = Alignment(horizontal='center')
+            
+        for c in range(1, 4):
+            ws.cell(row=current_row + i, column=c).border = thin_border
+            
+        # Lado Direito (Gestor)
+        ws.merge_cells(start_row=current_row + i, start_column=5, end_row=current_row + i, end_column=6)
+        if i < len(overall_gestor):
+            g_row = overall_gestor.iloc[i]
+            c_g = ws.cell(row=current_row + i, column=5, value=g_row['Nome'])
+            c_g.alignment = Alignment(horizontal='left')
+            ws.cell(row=current_row + i, column=7, value=int(g_row['Count'])).alignment = Alignment(horizontal='center')
+            
+        for c in range(5, 8):
+            ws.cell(row=current_row + i, column=c).border = thin_border
 
-    # Autofit columns
-    for column_cells in ws.columns:
-        # Get column letter safely
-        try:
-            col_letter = get_column_letter(column_cells[0].column)
-        except:
-             continue
-             
-        length = 0
-        for cell in column_cells:
-            try:
-                if cell.value:
-                    length = max(length, len(str(cell.value)))
-            except:
-                pass
-        ws.column_dimensions[col_letter].width = min(length + 2, 50)
+    current_row += max_overall
+    
+    current_row += 3
+    # --- FIM QUADRO RESUMO GERAL ---
+
+    # Set fixed column widths for the layout
+    ws.column_dimensions['A'].width = 5
+    ws.column_dimensions['B'].width = 45
+    ws.column_dimensions['C'].width = 12
+    ws.column_dimensions['D'].width = 5   # Spacing column
+    ws.column_dimensions['E'].width = 5
+    ws.column_dimensions['F'].width = 45
+    ws.column_dimensions['G'].width = 12
         
     wb.save(OUTPUT_FILE)
     print(f"Report generated: {OUTPUT_FILE}")
