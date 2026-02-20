@@ -1,15 +1,13 @@
 import pandas as pd
 import openpyxl
-from openpyxl.styles import PatternFill, Font
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from datetime import datetime
 import os
 import re
-from typing import Dict, List, Any, Optional, Union
-from decimal import Decimal, ROUND_HALF_UP
 
 # Caminhos dos arquivos
-CWD = os.path.dirname(os.path.abspath(__file__))
+CWD = r"d:\APRENDIZADO APP\MEDICOES"
 FILE_BASE = os.path.join(CWD, "BASE.xlsx")
 FILE_ANALITICA = os.path.join(CWD, "ANALITICA.xlsx")
 FILE_AUXILIAR = os.path.join(CWD, "AUXILIAR.xlsx")
@@ -20,19 +18,18 @@ def clean_sei(val):
     if pd.isna(val): return ""
     return str(val).strip()
 
-def to_numeric(val: Any) -> float:
+def to_numeric(val):
     if pd.isna(val): return 0.0
     if isinstance(val, (int, float)): return float(val)
     # Remove R$, espaços, pontos de milhar, troca vírgula por ponto
     s = str(val).replace("R$", "").replace("\xa0", "").replace(" ", "")
+    # Se houver pontos e vírgulas, assume que ponto é milhar e vírgula é decimal
     if "," in s and "." in s:
         s = s.replace(".", "").replace(",", ".")
     elif "," in s:
         s = s.replace(",", ".")
     try:
-        # Usar Decimal para arredondamento preciso e evitar problemas de overload do linter
-        d = Decimal(s).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)
-        return float(d)
+        return round(float(s), 2)
     except:
         return 0.0
 
@@ -76,9 +73,9 @@ def get_contractor_mapping():
                 mapping[orig] = res
     return mapping
 
-def get_comissoes_data() -> Dict[str, Dict[str, str]]:
+def get_comissoes_data():
     xl = pd.ExcelFile(FILE_COMISSOES)
-    data: Dict[str, Dict[str, str]] = {}
+    data = {}
     
     # 1. Lê a aba AUXILIAR para mapear SEI -> STATUS, GESTOR e LOCAL
     aux_sheet = next((s for s in xl.sheet_names if s.upper() == "AUXILIAR"), None)
@@ -123,27 +120,25 @@ def get_comissoes_data() -> Dict[str, Dict[str, str]]:
         
         if sei_idx is not None:
             for i in range(start_row, len(df)):
-                row_data = df.iloc[i]
-                sei = clean_sei(row_data[sei_idx])
+                row = df.iloc[i]
+                sei = clean_sei(row[sei_idx])
                 if not sei or sei.upper() == "NAN": continue
                 
-                gestor = str(row_data[gestor_idx]).strip() if gestor_idx is not None and pd.notna(row_data[gestor_idx]) else ""
+                gestor = str(row[gestor_idx]).strip() if gestor_idx is not None and pd.notna(row[gestor_idx]) else ""
                 
                 if sei not in data:
                     data[sei] = {'gestor': gestor, 'local': local_val, 'status_aux': ''}
                 else:
-                    item_ref: Optional[Dict[str, str]] = data.get(sei)
-                    if item_ref is not None:
-                        item_ref['local'] = local_val
-                        if gestor and not item_ref.get('gestor'):
-                            item_ref['gestor'] = gestor
+                    # Se já existe (pela AUXILIAR), atualiza o LOCAL se o da aba for mais específico
+                    data[sei]['local'] = local_val
+                    if gestor and not data[sei]['gestor']:
+                        data[sei]['gestor'] = gestor
     return data
 
 def apply_sheet_formatting(ws, col_map, header, all_months, model_widths, model_header_style,
                            h_vlr_contr, h_med_acum, h_saldo, h_inicio):
     """Aplica formatação idêntica (cabeçalhos, cores, bordas, larguras) a uma worksheet."""
-    from openpyxl.styles import Alignment, Border, Side
-
+    
     # Border style
     thin_border = Border(
         left=Side(style='thin'),
@@ -191,43 +186,63 @@ def apply_sheet_formatting(ws, col_map, header, all_months, model_widths, model_
 
     # Data content
     money_fmt = '_-R$ * #,##0.00_-;_-R$ * -#,##0.00_-;_-R$ * "-"??_-;_-@_-'
-    money_cols = [h_vlr_contr, "MEDIÇÕES 2025", h_med_acum, h_saldo] + all_months
-
+    # Utilizar as colunas que foram passadas como "all_months" ou colunas financeiras
+    # Mas aqui precisamos saber quais sao financeiras.
+    # Vamos inferir: tudo que é mês, valor, saldo.
+    
     for row in range(2, ws.max_row + 1):
         for col in range(1, len(header) + 1):
             ws.cell(row=row, column=col).border = thin_border
 
-        local_cell = ws.cell(row=row, column=col_map["LOCAL"])
-        local_val = str(local_cell.value).strip().upper()
-        if local_val in fills_local:
-            local_cell.fill = fills_local[local_val]
-            local_cell.font = Font(bold=True)
+        # Formatação LOCAL
+        if "LOCAL" in col_map:
+            local_cell = ws.cell(row=row, column=col_map["LOCAL"])
+            local_val = str(local_cell.value).strip().upper()
+            if local_val in fills_local:
+                local_cell.fill = fills_local[local_val]
+                local_cell.font = Font(bold=True)
 
-        reg_val = ws.cell(row=row, column=col_map["REGIÃO"]).value
-        if reg_val in fills_regiao:
-            ws.cell(row=row, column=col_map["REGIÃO"]).fill = fills_regiao[reg_val]
+        # Formatação REGIÃO
+        if "REGIÃO" in col_map:
+            reg_val = ws.cell(row=row, column=col_map["REGIÃO"]).value
+            if reg_val in fills_regiao:
+                ws.cell(row=row, column=col_map["REGIÃO"]).fill = fills_regiao[reg_val]
 
-        for mc in money_cols:
-            cell = ws.cell(row=row, column=col_map[mc])
-            cell.number_format = money_fmt
-            try:
-                if cell.value is not None:
-                    val_str = str(cell.value).replace('R$', '').replace(' ', '')
-                    if ',' in val_str and '.' not in val_str:
-                        val_str = val_str.replace(',', '.')
-                    # Usar Decimal aqui também
-                    d_val = Decimal(val_str).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)
-                    cell.value = float(d_val)
-                else:
+        # Formatação Financeira (heurística + lista passada)
+        # Se o nome da coluna estiver em all_months ou contiver VLR, SALDO, MEDIÇÕES (exceto ano solto)
+        for col_name, col_idx in col_map.items():
+            is_money = False
+            # Verifica meses
+            c_clean = col_name.replace(" ", "")
+            if re.match(r'^[A-Z]{3}/\d{2}$', c_clean):
+                is_money = True
+            elif any(k in col_name.upper() for k in ["VLR", "VALOR", "SALDO", "MEDIÇÕES", "MEDICOES"]):
+                # Evita "MEDIÇÕES 2025" se for só contagem, mas aqui é valor, então ok
+                is_money = True
+            
+            if is_money:
+                cell = ws.cell(row=row, column=col_idx)
+                cell.number_format = money_fmt
+                try:
+                    if cell.value is not None:
+                        val_clean = str(cell.value).replace('R$', '').replace(' ', '')
+                        if ',' in val_clean and '.' not in val_clean:
+                            val_clean = val_clean.replace(',', '.')
+                        cell.value = round(float(val_clean), 2)
+                    else:
+                        cell.value = 0.0
+                except:
                     cell.value = 0.0
-            except:
-                cell.value = 0.0
 
-        for dc in [h_inicio, "DATA FINAL"]:
-            cell = ws.cell(row=row, column=col_map[dc])
-            if cell.value:
-                cell.number_format = 'DD/MM/YYYY'
-        ws.cell(row=row, column=col_map["% EXEC."]).number_format = '0.00%'
+        # Formatação de Datas
+        for dc in [h_inicio, "DATA FINAL", "Prazo Final", "Ordem de Início"]:
+            if dc in col_map:
+                cell = ws.cell(row=row, column=col_map[dc])
+                if cell.value:
+                    cell.number_format = 'DD/MM/YYYY'
+        
+        if "% EXEC." in col_map:
+            ws.cell(row=row, column=col_map["% EXEC."]).number_format = '0.00%'
 
     # --- Aplicação de Larguras ---
     for col in ws.columns:
@@ -237,20 +252,13 @@ def apply_sheet_formatting(ws, col_map, header, all_months, model_widths, model_
         if val_header in model_widths and model_widths[val_header] is not None:
             ws.column_dimensions[column_letter].width = model_widths[val_header]
         else:
-            # Fallback autofit simples se não achar no modelo
+            # Fallback autofit simples
             max_len = max(len(str(cell.value)) for cell in col)
             ws.column_dimensions[column_letter].width = min(max_len + 5, 40)
 
 
 def prepare_dataframe(df, status_filter='EXECUÇÃO', keep_execution=True):
-    """Filtra, ordena e numera o DataFrame conforme o status desejado.
-    
-    Args:
-        df: DataFrame completo com todas as obras
-        status_filter: valor de status para filtrar
-        keep_execution: se True, mantém apenas registros com status == status_filter;
-                        se False, mantém registros com status != status_filter
-    """
+    """Filtra, ordena e numera o DataFrame conforme o status desejado."""
     if keep_execution:
         df_filtered = df[df['STATUS'] == status_filter].copy()
     else:
@@ -259,7 +267,7 @@ def prepare_dataframe(df, status_filter='EXECUÇÃO', keep_execution=True):
     # Remover duplicatas residuais
     df_filtered = df_filtered.drop_duplicates(subset=['SEI']).copy()
 
-    # Definir ordem customizada para LOCAL: CIVIS -> CONTINGENCIA -> ESPECIAIS
+    # Definir ordem customizada para LOCAL
     local_rank = {"CIVIS": 0, "CONTINGENCIA": 1, "ESPECIAIS": 2}
     df_filtered['_rank_local'] = df_filtered['LOCAL'].map(lambda x: local_rank.get(str(x).upper().strip(), 99))
 
@@ -274,154 +282,170 @@ def prepare_dataframe(df, status_filter='EXECUÇÃO', keep_execution=True):
 
     return df_filtered
 
+def get_model_structure():
+    """Lê o arquivo modelo MEDIÇÕES.xlsx para obter a ordem exata das colunas e estilos."""
+    model_path = FILE_BASE.replace("BASE.xlsx", "MEDIÇÕES.xlsx")
+    model_widths = {}
+    model_header_style = {}
+    ordered_columns = []
+    
+    try:
+        wb_mod = openpyxl.load_workbook(model_path, data_only=False)
+        ws_mod = wb_mod['Medições']
+        
+        # Ler cabeçalhos da linha 2
+        for i in range(1, ws_mod.max_column + 1):
+            cell_mod = ws_mod.cell(row=2, column=i)
+            val_mod = cell_mod.value
+            if val_mod:
+                name_clean = str(val_mod).replace('\n', ' ').strip()
+                ordered_columns.append(name_clean)
+                
+                col_let = get_column_letter(i)
+                w = ws_mod.column_dimensions[col_let].width
+                model_widths[name_clean] = w
+                
+                model_header_style[name_clean] = {
+                    'fill': cell_mod.fill.start_color.rgb if cell_mod.fill else None,
+                    'font_bold': cell_mod.font.bold if cell_mod.font else False,
+                    'font_color': cell_mod.font.color.rgb if cell_mod.font and cell_mod.font.color else None
+                }
+    except Exception as e:
+        print(f"Erro ao ler modelo: {e}")
+        return [], {}, {}
+        
+    return ordered_columns, model_widths, model_header_style
 
 def main():
     print("Iniciando...")
+    
+    # 1. Obter estrutura do modelo
+    ordered_columns, model_widths, model_header_style = get_model_structure()
+    
+    if not ordered_columns:
+        print("ALERTA: Não foi possível ler colunas do modelo. Usando fallback.")
+        return 
 
-    # 1. Carregar mapeamentos
+    # 2. Carregar mapeamentos
     region_map = get_region_mapping()
     comissoes_map = get_comissoes_data()
     contractor_map = get_contractor_mapping()
 
-    # 2. Carregar ANALITICA (Metadados) e remover duplicatas de SEI
+    # 3. Carregar DADOS
     df_ana = pd.read_excel(FILE_ANALITICA)
     df_ana['SEI_CLEAN'] = df_ana['Processo SEI'].apply(clean_sei)
-
-    # Se houver duplicatas de SEI na métrica analítica, mantemos apenas o primeiro
     df_ana = df_ana.drop_duplicates(subset=['SEI_CLEAN']).copy()
 
-    # 3. Carregar BASE (Lançamentos) e pivotar
     df_base = pd.read_excel(FILE_BASE)
     df_base['SEI_CLEAN'] = df_base['Processo SEI'].apply(clean_sei)
-    # Suporte ao novo formato BASE.xlsx (coluna 'Valor') e ao formato antigo ('Valor das medições')
-    if 'Valor' in df_base.columns:
-        df_base['Valor'] = df_base['Valor'].apply(to_numeric)
-    elif 'Valor das medições' in df_base.columns:
-        df_base['Valor'] = df_base['Valor das medições'].apply(to_numeric)
-    else:
-        raise KeyError("Coluna de valor não encontrada no BASE.xlsx. Esperado: 'Valor' ou 'Valor das medições'.")
+    df_base['Valor'] = df_base['Valor das medições'].apply(to_numeric)
 
     # Mapeamento de meses para string JAN/21
     meses_pt: Dict[int, str] = {1: "JAN", 2: "FEV", 3: "MAR", 4: "ABR", 5: "MAI", 6: "JUN", 7: "JUL", 8: "AGO", 9: "SET", 10: "OUT", 11: "NOV", 12: "DEZ"}
-    # Mapeamento de nomes completos em português para abreviação
-    meses_nome_pt: Dict[str, str] = {
-        "JANEIRO": "JAN", "FEVEREIRO": "FEV", "MARÇO": "MAR", "MARCO": "MAR",
-        "ABRIL": "ABR", "MAIO": "MAI", "JUNHO": "JUN", "JULHO": "JUL",
-        "AGOSTO": "AGO", "SETEMBRO": "SET", "OUTUBRO": "OUT",
-        "NOVEMBRO": "NOV", "DEZEMBRO": "DEZ"
-    }
     def format_mes_ano(r: Any) -> str:
         ano_val = str(r['Ano'])
         ano_s = str(ano_val)
-
+        
         # Linter-friendly suffix extraction
         suffix = ano_s
         if len(ano_s) >= 2:
-            # Manual substring to avoid slice type confusion
-            suffix = ano_s[len(ano_s)-2] + ano_s[len(ano_s)-1]
-
-        mes_raw = r['Mês']
-        mes_str = "JAN"
-        if pd.notna(mes_raw):
-            mes_val_s = str(mes_raw).strip().upper()
-            # Tenta interpretar como nome completo (ex: "JANEIRO")
-            if mes_val_s in meses_nome_pt:
-                mes_str = meses_nome_pt[mes_val_s]
-            else:
-                # Fallback: tenta interpretar como número (ex: 1, 2, ..., 12)
-                try:
-                    mes_num: int = int(float(mes_val_s))
-                    mes_str = meses_pt.get(mes_num, "JAN")
-                except (ValueError, TypeError):
-                    mes_str = "JAN"
+             # Manual substring to avoid slice type confusion
+             suffix = ano_s[len(ano_s)-2] + ano_s[len(ano_s)-1]
+        
+        mes_val: int = int(r['Mês'])
+        mes_str = meses_pt.get(mes_val, "JAN")
         return f"{mes_str}/{suffix}"
     df_base['MesAno'] = df_base.apply(format_mes_ano, axis=1)
 
-    # Pivotar: Index SEI, Columns MesAno, Values Valor
     df_pivot = df_base.pivot_table(index='SEI_CLEAN', columns='MesAno', values='Valor', aggfunc='sum').fillna(0)
 
     # 4. Consolidar dados
     final_rows = []
     gestores_faltantes = []
-
-    # Ordenar colunas de meses (JAN/21 a DEZ/26)
-    all_months = []
-    for ano in range(21, 27):
-        for mes in range(1, 13):
-            all_months.append(f"{meses_pt[mes]}/{str(ano)}")
-
-    # Nomes exatos com quebras de linha conforme o modelo
-    h_prazo = "PRAZO\nEXECUÇÃO"
-    h_inicio = "ORDEM\nDE INÍCIO"
-    h_vlr_contr = "VLR.CONTRATO\nC/ADITIVO"
-    h_med_acum = "MEDIÇÕES\nACUMULADAS"
-    h_saldo = "SALDO DO\nCONTRATO"
-
+    
     for _, row in df_ana.iterrows():
         sei = row['SEI_CLEAN']
-
         info = comissoes_map.get(sei, {'gestor': '', 'local': 'CIVIS', 'status_aux': ''})
-        gestor = info['gestor']
-        local = info['local']
-        status_final = info.get('status_aux') if info.get('status_aux') else str(row['Fase']).strip().upper()
-
-        if not gestor:
-            gestores_faltantes.append({'SEI': row['Processo SEI'], 'CONTRATADA': row['Contratada']})
-
-        muni = str(row['Municipio']).strip().upper()
-        regiao = region_map.get(muni, "")
-
-        ordem_inicio = pd.to_datetime(row['Ordem de Início'], errors='coerce')
-        data_final = pd.to_datetime(row['Prazo Final'], errors='coerce')
-        prazo = (data_final - ordem_inicio).days if pd.notnull(data_final) and pd.notnull(ordem_inicio) else ""
-
-        vlr_contrato = to_numeric(row['Valor contrato (Atual)'])
-
-        med_months: Dict[str, float] = {}
-        for m in all_months:
-            m_raw = df_pivot.loc[sei, m] if (sei in df_pivot.index and m in df_pivot.columns) else 0.0
-            med_months[m] = float(Decimal(float(m_raw)).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP))
-
-        med_2025 = float(sum([float(med_months.get(f"{meses_pt.get(mx)}/25", 0.0)) for mx in range(1, 13)]))
-        med_2026 = float(sum([float(med_months.get(f"{meses_pt.get(mx)}/26", 0.0)) for mx in range(1, 13)]))
-        med_acumulada = float(sum([float(vx) for vx in med_months.values()]))
-
-        perc_exec = float(med_acumulada / vlr_contrato) if vlr_contrato > 0.0 else 0.0
-        saldo = float(vlr_contrato - med_acumulada)
-        # Contratada (Substituir pelo Resumido se houver match)
-        fullname = str(row['Contratada']).strip()
-        norm_name = normalize_name(fullname)
-        contratada_final = contractor_map.get(norm_name, fullname)
-
-        # Montar a linha final conforme layout
-        linha = {
+        
+        # Dados básicos
+        dados = {
             "SEI": row['Processo SEI'],
-            "LOCAL": local,
-            h_prazo: prazo,
-            h_inicio: ordem_inicio,
-            "DATA FINAL": data_final,
-            h_vlr_contr: vlr_contrato,
-            "STATUS": status_final,
-            "GESTOR": gestor,
-            "REGIÃO": regiao,
+            "LOCAL": info['local'],
+            "STATUS": info.get('status_aux') if info.get('status_aux') else str(row['Fase']).strip().upper(),
+            "GESTOR": info['gestor'],
             "MUNICIPIO": row['Municipio'],
-            "CONTRATADA": contratada_final,
-            "MEDIÇÕES 2025": float(Decimal(med_2025).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)),
-            "MEDIÇÕES 2026": float(Decimal(med_2026).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)),
-            h_med_acum: float(Decimal(med_acumulada).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)),
-            "% EXEC.": perc_exec,
-            h_saldo: float(Decimal(saldo).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP))
+            "REGIÃO": region_map.get(str(row['Municipio']).strip().upper(), ""),
+            "CONTRATADA": contractor_map.get(normalize_name(str(row['Contratada'])), str(row['Contratada']).strip())
         }
-        linha.update(med_months)
-        final_rows.append(linha)
+
+        if not dados['GESTOR']:
+            gestores_faltantes.append({'SEI': dados['SEI'], 'CONTRATADA': row['Contratada']})
+
+        # Datas e Prazos
+        dt_ini = pd.to_datetime(row['Ordem de Início'], errors='coerce')
+        dt_fim = pd.to_datetime(row['Prazo Final'], errors='coerce')
+        dados["ORDEM DE INÍCIO"] = dt_ini
+        dados["DATA FINAL"] = dt_fim
+        dados["PRAZO EXECUÇÃO"] = (dt_fim - dt_ini).days if pd.notnull(dt_fim) and pd.notnull(dt_ini) else ""
+
+        # Financeiro
+        vlr_contr = to_numeric(row['Valor contrato (Atual)'])
+        dados["VLR.CONTRATO C/ADITIVO"] = vlr_contr
+
+        med_acumulada = 0.0
+        med_2025 = 0.0
+        
+        # Preencher meses baseado nas colunas do modelo
+        for col_name in ordered_columns:
+            # Tenta casar com padrão de mês
+            col_clean = col_name.replace(" ", "")
+            
+            # Se a coluna existe no pivot, puxa o valor
+            if col_clean in df_pivot.columns:
+                val = df_pivot.loc[sei, col_clean] if sei in df_pivot.index else 0.0
+                dados[col_name] = round(val, 2)
+                med_acumulada += val
+                if "/25" in col_clean:
+                    # Verifica se é coluna de mês para somar no MEDIÇÕES 2025
+                    if re.match(r'^[A-Z]{3}/\d{2}$', col_clean):
+                        med_2025 += val
+            elif col_name not in dados:
+                 # Coluna do modelo que não é dado básico e não está no pivot (ex: mês futuro ou coluna calculada)
+                 # Se for mês futuro (ex: JAN/26) e não tem no pivot, é 0.
+                 pass
+
+        dados["MEDIÇÕES ACUMULADAS"] = round(med_acumulada, 2)
+        dados["MEDIÇÕES 2025"] = round(med_2025, 2)
+        dados["SALDO DO CONTRATO"] = round(vlr_contr - med_acumulada, 2)
+        dados["% EXEC."] = (med_acumulada / vlr_contr) if vlr_contr > 0 else 0.0
+
+        # Montar linha final ordenada
+        linha_ordenada = {}
+        for col in ordered_columns:
+            val = dados.get(col)
+            
+            # Fallback de Nomes
+            if val is None:
+                if "PRAZO" in col and "EXECUÇÃO" in col: val = dados.get("PRAZO EXECUÇÃO")
+                elif "ORDEM" in col and "INÍCIO" in col: val = dados.get("ORDEM DE INÍCIO")
+                elif "VLR" in col and "CONTRATO" in col: val = dados.get("VLR.CONTRATO C/ADITIVO")
+                elif "MEDIÇÕES" in col and "ACUMULADAS" in col: val = dados.get("MEDIÇÕES ACUMULADAS")
+                elif "SALDO" in col and "CONTRATO" in col: val = dados.get("SALDO DO CONTRATO")
+                elif "%" in col and "EXEC" in col: val = dados.get("% EXEC.")
+            
+            linha_ordenada[col] = val if val is not None else ""
+            
+        final_rows.append(linha_ordenada)
 
     df_all = pd.DataFrame(final_rows)
+    # Garante a ordem das colunas
+    df_all = df_all[ordered_columns]
 
-    # Separar em EXECUÇÃO e PROBLEMAS (status != EXECUÇÃO)
+    # Separar em EXECUÇÃO e PROBLEMAS
     df_execucao = prepare_dataframe(df_all, status_filter='EXECUÇÃO', keep_execution=True)
     df_problemas = prepare_dataframe(df_all, status_filter='EXECUÇÃO', keep_execution=False)
 
-    # --- Escrever todas as abas: Medições, PROBLEMAS, GESTOR_FALTANTES ---
+    # Escrever
     with pd.ExcelWriter(FILE_OUTPUT, engine='openpyxl') as writer:
         df_execucao.to_excel(writer, sheet_name='Medições', index=False)
         if not df_problemas.empty:
@@ -429,45 +453,22 @@ def main():
         if gestores_faltantes:
             pd.DataFrame(gestores_faltantes).to_excel(writer, sheet_name='GESTOR_FALTANTES', index=False)
 
+    # Formatar
     wb = openpyxl.load_workbook(FILE_OUTPUT)
-
-    # --- LEITURA DE ESTILOS E LARGURAS DO MODELO (uma única vez) ---
-    model_widths = {}
-    model_header_style = {}
-    try:
-        wb_mod = openpyxl.load_workbook(FILE_BASE.replace("BASE.xlsx", "MEDIÇÕES.xlsx"), data_only=False)
-        ws_mod = wb_mod['Medições']
-        # No modelo as colunas começam na linha 2 (visto em testes anteriores)
-        for i in range(1, ws_mod.max_column + 1):
-            col_let = get_column_letter(i)
-            w = ws_mod.column_dimensions[col_let].width
-            cell_mod = ws_mod.cell(row=2, column=i)
-            val_mod = cell_mod.value
-            if val_mod:
-                name_clean = str(val_mod).replace('\n', ' ').strip()
-                model_widths[name_clean] = w
-                model_header_style[name_clean] = {
-                    'fill': cell_mod.fill.start_color.rgb if cell_mod.fill else None,
-                    'font_bold': cell_mod.font.bold if cell_mod.font else False,
-                    'font_color': cell_mod.font.color.rgb if cell_mod.font and cell_mod.font.color else None
-                }
-    except Exception as e:
-        print(f"Aviso: Não foi possível ler larguras do modelo: {e}")
-
-    # --- Formatar aba Medições ---
-    ws_med = wb['Medições']
-    header_med = [cell.value for cell in ws_med[1]]
-    col_map_med = {name: i + 1 for i, name in enumerate(header_med)}
-    apply_sheet_formatting(ws_med, col_map_med, header_med, all_months, model_widths, model_header_style,
-                           h_vlr_contr, h_med_acum, h_saldo, h_inicio)
-
-    # --- Formatar aba PROBLEMAS (mesma estrutura exata) ---
-    if 'PROBLEMAS' in wb.sheetnames:
-        ws_prob = wb['PROBLEMAS']
-        header_prob = [cell.value for cell in ws_prob[1]]
-        col_map_prob = {name: i + 1 for i, name in enumerate(header_prob)}
-        apply_sheet_formatting(ws_prob, col_map_prob, header_prob, all_months, model_widths, model_header_style,
-                               h_vlr_contr, h_med_acum, h_saldo, h_inicio)
+    
+    for sheet_name in ['Medições', 'PROBLEMAS']:
+        if sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            apply_sheet_formatting(ws, 
+                                   col_map={c: i+1 for i, c in enumerate(ordered_columns)}, 
+                                   header=ordered_columns, 
+                                   all_months=[], # Não usado mais na nova lógica de formatação interna
+                                   model_widths=model_widths, 
+                                   model_header_style=model_header_style,
+                                   h_vlr_contr="VLR.CONTRATO C/ADITIVO", 
+                                   h_med_acum="MEDIÇÕES ACUMULADAS", 
+                                   h_saldo="SALDO DO CONTRATO", 
+                                   h_inicio="ORDEM DE INÍCIO")
 
     wb.save(FILE_OUTPUT)
     print(f"Finalizado: {FILE_OUTPUT}")
@@ -475,7 +476,6 @@ def main():
     print(f"  - Aba 'PROBLEMAS': {len(df_problemas)} obras com status != EXECUÇÃO")
     if gestores_faltantes:
         print(f"  - Aba 'GESTOR_FALTANTES': {len(gestores_faltantes)} registros sem gestor")
-
 
 if __name__ == "__main__":
     main()
