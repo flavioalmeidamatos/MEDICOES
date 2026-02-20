@@ -485,6 +485,7 @@ def main():
 
         med_acumulada = 0.0
         med_2025 = 0.0
+        med_2026 = 0.0
         
         # Preencher meses baseado nas colunas do modelo
         for col_name in ordered_columns:
@@ -500,6 +501,10 @@ def main():
                     # Verifica se é coluna de mês para somar no MEDIÇÕES 2025
                     if re.match(r'^[A-Z]{3}/\d{2}$', col_clean):
                         med_2025 += val
+                elif "/26" in col_clean:
+                    # Verifica se é coluna de mês para somar no MEDIÇÕES 2026
+                    if re.match(r'^[A-Z]{3}/\d{2}$', col_clean):
+                        med_2026 += val
             elif col_name not in dados:
                  # Coluna do modelo que não é dado básico e não está no pivot (ex: mês futuro ou coluna calculada)
                  # Se for mês futuro (ex: JAN/26) e não tem no pivot, é 0.
@@ -507,6 +512,7 @@ def main():
 
         dados["MEDIÇÕES ACUMULADAS"] = round(med_acumulada, 2)
         dados["MEDIÇÕES 2025"] = round(med_2025, 2)
+        dados["MEDIÇÕES 2026"] = round(med_2026, 2)
         dados["SALDO DO CONTRATO"] = round(vlr_contr - med_acumulada, 2)
         dados["% EXEC."] = (med_acumulada / vlr_contr) if vlr_contr > 0 else 0.0
 
@@ -521,6 +527,8 @@ def main():
                 elif "ORDEM" in col and "INÍCIO" in col: val = dados.get("ORDEM DE INÍCIO")
                 elif "VLR" in col and "CONTRATO" in col: val = dados.get("VLR.CONTRATO C/ADITIVO")
                 elif "MEDIÇÕES" in col and "ACUMULADAS" in col: val = dados.get("MEDIÇÕES ACUMULADAS")
+                elif "MEDIÇÕES" in col and "2025" in col: val = dados.get("MEDIÇÕES 2025")
+                elif "MEDIÇÕES" in col and "2026" in col: val = dados.get("MEDIÇÕES 2026")
                 elif "SALDO" in col and "CONTRATO" in col: val = dados.get("SALDO DO CONTRATO")
                 elif "%" in col and "EXEC" in col: val = dados.get("% EXEC.")
             
