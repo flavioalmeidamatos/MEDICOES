@@ -276,13 +276,42 @@ def apply_sheet_formatting(ws, col_map, header, all_months, model_widths, model_
     for col in ws.columns:
         column_letter = col[0].column_letter
         val_header = str(col[0].value).replace('\n', ' ').strip()
-
-        if val_header in model_widths and model_widths[val_header] is not None:
-            ws.column_dimensions[column_letter].width = model_widths[val_header]
-        else:
-            # Fallback autofit simples
-            max_len = max(len(str(cell.value)) for cell in col)
-            ws.column_dimensions[column_letter].width = min(max_len + 5, 40)
+        
+        # Base width from model or fallback
+        width = model_widths.get(val_header, 15)
+        
+        # Sanity checks and adjustments
+        # 1. Currency Columns (Months and Totals)
+        is_money = False
+        if re.match(r'^[A-Z]{3}/\d{2}$', val_header):
+            is_money = True
+        elif any(k in val_header.upper() for k in ["VLR", "VALOR", "SALDO", "MEDIÇÕES", "MEDICOES"]):
+            is_money = True
+        
+        if is_money:
+            # Aumentado para 25 para dar folga extra e evitar qualquer #### 
+            # mesmo com valores muito altos e formatação R$
+            width = max(width, 25)
+        
+        # 2. Date Columns
+        if any(k in val_header.upper() for k in ["DATA", "INÍCIO", "FINAL", "PRAZO"]):
+            width = max(width, 16)
+            
+        # 3. Specific Columns
+        if val_header == "SEI":
+            width = max(width, 24)
+        elif val_header == "GESTOR":
+            width = min(max(width, 25), 35)
+        elif val_header == "MUNICIPIO":
+            width = min(max(width, 18), 25)
+        elif val_header == "CONTRATADA":
+            width = max(width, 22)
+        elif val_header == "Nº":
+            width = 6
+        elif "%" in val_header:
+            width = 12
+            
+        ws.column_dimensions[column_letter].width = width
 
 
 def prepare_dataframe(df, status_filter='EXECUÇÃO', keep_execution=True):
@@ -385,7 +414,12 @@ def main():
         "NOVEMBRO": "NOV", "DEZEMBRO": "DEZ"
     }
     def format_mes_ano(r):
-        ano_s = str(r['Ano'])
+        try:
+            # Garante que 2025.0 ou "2025" vire 2025 e depois suffix "25"
+            ano_val = int(float(str(r['Ano'])))
+            ano_s = str(ano_val)
+        except:
+            ano_s = str(r['Ano'])
         suffix = ano_s[-2:] if len(ano_s) >= 2 else ano_s
         mes_raw = r['Mês']
         mes_str = "JAN"
