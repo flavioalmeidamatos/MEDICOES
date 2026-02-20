@@ -76,63 +76,91 @@ def get_contractor_mapping():
 def get_comissoes_data():
     xl = pd.ExcelFile(FILE_COMISSOES)
     data = {}
-    
-    # 1. Lê a aba AUXILIAR para mapear SEI -> STATUS, GESTOR e LOCAL
+
+    # --- PASSO 1: Lê a aba AUXILIAR para STATUS e LOCAL (gestor aqui é apenas fallback) ---
     aux_sheet = next((s for s in xl.sheet_names if s.upper() == "AUXILIAR"), None)
     if aux_sheet:
         df_aux = pd.read_excel(FILE_COMISSOES, sheet_name=aux_sheet)
-        # Normaliza colunas
         df_aux.columns = [str(c).upper().strip() for c in df_aux.columns]
         if 'SEI' in df_aux.columns:
             for _, row in df_aux.iterrows():
                 sei = clean_sei(row['SEI'])
                 if not sei: continue
+                # Tenta ler gestor da AUXILIAR como fallback inicial
+                gestor_aux = ""
+                for col_g in ['GESTOR(A) ATUANTE', 'GESTOR(A)', 'GESTOR']:
+                    if col_g in df_aux.columns and pd.notna(row.get(col_g)):
+                        gestor_aux = str(row[col_g]).strip()
+                        break
+                status_val = str(row['STATUS']).replace('#', '').strip().upper() if 'STATUS' in df_aux.columns and pd.notna(row.get('STATUS')) else ""
+                local_val  = str(row['LOCAL']).strip().upper() if 'LOCAL' in df_aux.columns and pd.notna(row.get('LOCAL')) else "CIVIS"
                 data[sei] = {
-                    'gestor': str(row['GESTOR']).strip() if 'GESTOR' in df_aux.columns and pd.notna(row['GESTOR']) else "",
-                    'status_aux': str(row['STATUS']).replace('#', '').strip().upper() if 'STATUS' in df_aux.columns and pd.notna(row['STATUS']) else "",
-                    'local': str(row['LOCAL']).strip().upper() if 'LOCAL' in df_aux.columns and pd.notna(row['LOCAL']) else "CIVIS"
+                    'gestor': gestor_aux,
+                    'status_aux': status_val,
+                    'local': local_val
                 }
 
-    # 2. Percorre as abas específicas para garantir o LOCAL correto baseado na aba
+    # --- PASSO 2: Abas regionais — fonte primária do GESTOR(A) ATUANTE por SEI ---
     for sheet in xl.sheet_names:
-        if sheet.upper() == "AUXILIAR": continue
-        
+        if sheet.upper() == "AUXILIAR":
+            continue
+
         local_val = "CIVIS"
-        if sheet.upper() == "CONTIGENCIA": local_val = "CONTINGENCIA"
-        elif sheet.upper() == "ESPECIAIS": local_val = "ESPECIAIS"
-            
+        if sheet.upper() == "CONTIGENCIA":
+            local_val = "CONTINGENCIA"
+        elif sheet.upper() == "ESPECIAIS":
+            local_val = "ESPECIAIS"
+
         df = pd.read_excel(FILE_COMISSOES, sheet_name=sheet, header=None)
-        
-        sei_idx = None
+
+        sei_idx    = None
         gestor_idx = None
-        start_row = 0
-        
+        start_row  = 0
+
+        # Detecta linha de cabeçalho e índices das colunas SEI e GESTOR(A) ATUANTE
         for i in range(min(10, len(df))):
             row_vals = df.iloc[i].fillna("").astype(str).str.upper().tolist()
             s, g = None, None
             for j, val in enumerate(row_vals):
                 v = val.replace("\n", " ").strip()
-                if "SEI" == v or "PROCESSO SEI" == v: s = j
-                if any(x in v for x in ["GESTOR", "GESTOR(A)", "GESTOR ATUANTE"]): g = j
+                if v in ("SEI", "PROCESSO SEI"):
+                    s = j
+                # Aceita qualquer variação: GESTOR(A) ATUANTE, GESTOR ATUANTE, GESTOR(A), GESTOR
+                if any(x in v for x in ["GESTOR(A) ATUANTE", "GESTOR ATUANTE", "GESTOR(A)", "GESTOR"]):
+                    g = j
             if s is not None and g is not None:
                 sei_idx, gestor_idx, start_row = s, g, i + 1
                 break
-        
-        if sei_idx is not None:
-            for i in range(start_row, len(df)):
-                row = df.iloc[i]
-                sei = clean_sei(row[sei_idx])
-                if not sei or sei.upper() == "NAN": continue
-                
-                gestor = str(row[gestor_idx]).strip() if gestor_idx is not None and pd.notna(row[gestor_idx]) else ""
-                
-                if sei not in data:
-                    data[sei] = {'gestor': gestor, 'local': local_val, 'status_aux': ''}
-                else:
-                    # Se já existe (pela AUXILIAR), atualiza o LOCAL se o da aba for mais específico
-                    data[sei]['local'] = local_val
-                    if gestor and not data[sei]['gestor']:
-                        data[sei]['gestor'] = gestor
+
+        if sei_idx is None:
+            print(f"  Aviso: coluna SEI não encontrada na aba '{sheet}' — pulando.")
+            continue
+
+        for i in range(start_row, len(df)):
+            row = df.iloc[i]
+            sei = clean_sei(row[sei_idx])
+            if not sei or sei.upper() == "NAN":
+                continue
+
+            # Lê o GESTOR(A) ATUANTE da aba regional
+            gestor_regional = ""
+            if gestor_idx is not None and pd.notna(row[gestor_idx]):
+                gestor_regional = str(row[gestor_idx]).strip()
+
+            if sei not in data:
+                # Novo registro: cria com dados da aba regional
+                data[sei] = {
+                    'gestor': gestor_regional,
+                    'local': local_val,
+                    'status_aux': ''
+                }
+            else:
+                # Já existia (da AUXILIAR): atualiza LOCAL e SOBRESCREVE gestor
+                # com o GESTOR(A) ATUANTE da aba regional — fonte mais confiável
+                data[sei]['local'] = local_val
+                if gestor_regional:
+                    data[sei]['gestor'] = gestor_regional
+
     return data
 
 def apply_sheet_formatting(ws, col_map, header, all_months, model_widths, model_header_style,
@@ -338,22 +366,40 @@ def main():
 
     df_base = pd.read_excel(FILE_BASE)
     df_base['SEI_CLEAN'] = df_base['Processo SEI'].apply(clean_sei)
-    df_base['Valor'] = df_base['Valor das medições'].apply(to_numeric)
+    # Suporte ao novo formato BASE.xlsx (coluna 'Valor') e ao formato antigo ('Valor das medições')
+    if 'Valor' in df_base.columns:
+        df_base['Valor'] = df_base['Valor'].apply(to_numeric)
+    elif 'Valor das medições' in df_base.columns:
+        df_base['Valor'] = df_base['Valor das medições'].apply(to_numeric)
+    else:
+        raise KeyError("Coluna de valor não encontrada no BASE.xlsx. Esperado: 'Valor' ou 'Valor das medições'.")
 
-    # Mapeamento de meses para string JAN/21
-    meses_pt: Dict[int, str] = {1: "JAN", 2: "FEV", 3: "MAR", 4: "ABR", 5: "MAI", 6: "JUN", 7: "JUL", 8: "AGO", 9: "SET", 10: "OUT", 11: "NOV", 12: "DEZ"}
-    def format_mes_ano(r: Any) -> str:
-        ano_val = str(r['Ano'])
-        ano_s = str(ano_val)
-        
-        # Linter-friendly suffix extraction
-        suffix = ano_s
-        if len(ano_s) >= 2:
-             # Manual substring to avoid slice type confusion
-             suffix = ano_s[len(ano_s)-2] + ano_s[len(ano_s)-1]
-        
-        mes_val: int = int(r['Mês'])
-        mes_str = meses_pt.get(mes_val, "JAN")
+    # Mapeamento de meses: número inteiro -> abreviação
+    meses_pt = {1: "JAN", 2: "FEV", 3: "MAR", 4: "ABR", 5: "MAI", 6: "JUN",
+                7: "JUL", 8: "AGO", 9: "SET", 10: "OUT", 11: "NOV", 12: "DEZ"}
+    # Mapeamento de nomes completos em português -> abreviação
+    meses_nome_pt = {
+        "JANEIRO": "JAN", "FEVEREIRO": "FEV", "MARÇO": "MAR", "MARCO": "MAR",
+        "ABRIL": "ABR", "MAIO": "MAI", "JUNHO": "JUN", "JULHO": "JUL",
+        "AGOSTO": "AGO", "SETEMBRO": "SET", "OUTUBRO": "OUT",
+        "NOVEMBRO": "NOV", "DEZEMBRO": "DEZ"
+    }
+    def format_mes_ano(r):
+        ano_s = str(r['Ano'])
+        suffix = ano_s[-2:] if len(ano_s) >= 2 else ano_s
+        mes_raw = r['Mês']
+        mes_str = "JAN"
+        if pd.notna(mes_raw):
+            mes_val_s = str(mes_raw).strip().upper()
+            if mes_val_s in meses_nome_pt:
+                # Nome completo: "Janeiro", "JANEIRO", etc.
+                mes_str = meses_nome_pt[mes_val_s]
+            else:
+                # Fallback numérico: 1, 2, ..., 12
+                try:
+                    mes_str = meses_pt.get(int(float(mes_val_s)), "JAN")
+                except (ValueError, TypeError):
+                    mes_str = "JAN"
         return f"{mes_str}/{suffix}"
     df_base['MesAno'] = df_base.apply(format_mes_ano, axis=1)
 
