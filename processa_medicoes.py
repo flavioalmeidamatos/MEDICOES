@@ -406,19 +406,16 @@ def apply_sheet_formatting(ws, col_map, header, all_months, model_widths, model_
         ws.column_dimensions[column_letter].width = width
 
 
-def prepare_dataframe(df, status_filter=['EXECUÇÃO', 'ATA DE REGISTRO'], keep_execution=True):
+def prepare_dataframe(df, keep_execution=True):
     """Filtra, ordena e numera o DataFrame conforme os status desejados."""
-    # Garante que status_filter seja uma lista
-    if isinstance(status_filter, str):
-        status_filter = [status_filter]
-    
-    # Garante que a coluna STATUS seja tratada como string para evitar erros de tipo
-    status_col = df['STATUS'].astype(str)
+    # Filtro flexível para incluir variações como "ATA DE REGISTRO DE PREÇO"
+    status_col = df['STATUS'].astype(str).str.upper()
+    mask = status_col.str.contains('EXECUÇÃO|EXECUCAO|ATA DE REGISTRO', na=False)
     
     if keep_execution:
-        df_filtered = df[status_col.isin(status_filter)].copy()
+        df_filtered = df[mask].copy()
     else:
-        df_filtered = df[~status_col.isin(status_filter)].copy()
+        df_filtered = df[~mask].copy()
 
     # Remover duplicatas residuais
     df_filtered = df_filtered.drop_duplicates(subset=['SEI']).copy()
@@ -649,8 +646,8 @@ def main():
     df_all = df_all[ordered_columns]
 
     # Separar em EXECUÇÃO e PROBLEMAS
-    df_execucao = prepare_dataframe(df_all, status_filter='EXECUÇÃO', keep_execution=True)
-    df_problemas = prepare_dataframe(df_all, status_filter='EXECUÇÃO', keep_execution=False)
+    df_execucao = prepare_dataframe(df_all, keep_execution=True)
+    df_problemas = prepare_dataframe(df_all, keep_execution=False)
 
     # REMOVER FISCAL SOMENTE DA ABA MEDIÇÕES
     if "FISCAL" in df_execucao.columns:
