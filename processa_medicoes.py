@@ -1,7 +1,7 @@
-import pandas as pd
-import openpyxl
-from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
+import pandas as pd # type: ignore
+import openpyxl # type: ignore
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side # type: ignore
+from openpyxl.utils import get_column_letter # type: ignore
 from datetime import datetime
 import os
 import re
@@ -30,8 +30,8 @@ def to_numeric(val):
     elif "," in s:
         s = s.replace(",", ".")
     try:
-        f_val = float(s)
-        return float(round(f_val, 2))
+        f_val: float = float(s)
+        return float(round(f_val, 2)) # type: ignore
     except:
         return 0.0
 
@@ -180,8 +180,8 @@ def get_gestor_fiscal_data():
             df_ctrl_raw = pd.read_excel(FILE_CONTROLES, header=None)
             
             # Percorre o arquivo buscando blocos de dados (SEI e GESTOR)
-            for i in range(len(df_ctrl_raw)):
-                row_vals = [str(v).strip().upper() for v in df_ctrl_raw.iloc[i].fillna("").astype(str)]
+            for i in range(len(df_ctrl_raw)): # type: ignore
+                row_vals = [str(v).strip().upper() for v in df_ctrl_raw.iloc[i].fillna("").astype(str)] # type: ignore
                 if "SEI" in row_vals and any("GESTOR" in v for v in row_vals):
                     # Achou cabeçalho
                     cols = {v: idx for idx, v in enumerate(row_vals) if v}
@@ -311,7 +311,7 @@ def apply_sheet_formatting(ws, col_map, header, all_months, model_widths, model_
                         val_clean = str(cell.value).replace('R$', '').replace(' ', '')
                         if ',' in val_clean and '.' not in val_clean:
                             val_clean = val_clean.replace(',', '.')
-                        cell.value = float(round(float(val_clean), 2))
+                        cell.value = float(round(float(val_clean), 2)) # type: ignore
                     else:
                         cell.value = 0.0
                 except:
@@ -550,19 +550,20 @@ def main():
         vlr_contr = to_numeric(row['Valor contrato (Atual)'])
         dados["VLR.CONTRATO C/ADITIVO"] = vlr_contr
 
-        med_acumulada = 0.0
-        med_2025 = 0.0
-        med_2026 = 0.0
+        med_acumulada: float = 0.0
+        med_2025: float = 0.0
+        med_2026: float = 0.0
         
         # Preencher meses baseado nas colunas do modelo
         for col_name in ordered_columns:
             # Tenta casar com padrão de mês
-            col_clean = col_name.replace(" ", "")
+            col_clean = str(col_name).replace(" ", "")
             
             # Se a coluna existe no pivot, puxa o valor
-            if col_clean in df_pivot.columns:
-                val = float(df_pivot.loc[sei, col_clean]) if sei in df_pivot.index else 0.0
-                dados[col_name] = float(round(val, 2))
+            if col_clean in df_pivot.columns: # type: ignore
+                val_raw = df_pivot.loc[sei, col_clean] if sei in df_pivot.index else 0.0 # type: ignore
+                val: float = float(val_raw)
+                dados[col_name] = float(round(val, 2)) # type: ignore
                 med_acumulada += val
                 if "/25" in str(col_clean):
                     # Verifica se é coluna de mês para somar no MEDIÇÕES 2025
@@ -576,11 +577,11 @@ def main():
                  # Coluna do modelo que não é dado básico e não está no pivot
                  pass
 
-        dados["MEDIÇÕES ACUMULADAS"] = float(round(med_acumulada, 2))
-        dados["MEDIÇÕES 2025"] = float(round(med_2025, 2))
-        dados["MEDIÇÕES 2026"] = float(round(med_2026, 2))
-        dados["SALDO DO CONTRATO"] = float(round(vlr_contr - med_acumulada, 2))
-        dados["% EXEC."] = float(med_acumulada / vlr_contr) if vlr_contr > 0 else 0.0
+        dados["MEDIÇÕES ACUMULADAS"] = float(round(med_acumulada, 2)) # type: ignore
+        dados["MEDIÇÕES 2025"] = float(round(med_2025, 2)) # type: ignore
+        dados["MEDIÇÕES 2026"] = float(round(med_2026, 2)) # type: ignore
+        dados["SALDO DO CONTRATO"] = float(round(float(vlr_contr) - med_acumulada, 2)) # type: ignore
+        dados["% EXEC."] = float(med_acumulada / float(vlr_contr)) if vlr_contr > 0 else 0.0
 
         # Montar linha final ordenada
         linha_ordenada = {}
