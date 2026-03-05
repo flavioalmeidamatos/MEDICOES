@@ -645,6 +645,10 @@ def main():
     df_execucao = prepare_dataframe(df_all, status_filter='EXECUÇÃO', keep_execution=True)
     df_problemas = prepare_dataframe(df_all, status_filter='EXECUÇÃO', keep_execution=False)
 
+    # REMOVER FISCAL SOMENTE DA ABA MEDIÇÕES
+    if "FISCAL" in df_execucao.columns:
+        df_execucao = df_execucao.drop(columns=["FISCAL"])
+
     # Escrever
     with pd.ExcelWriter(FILE_OUTPUT, engine='openpyxl') as writer:
         df_execucao.to_excel(writer, sheet_name='Medições', index=False)
@@ -656,13 +660,22 @@ def main():
     # Formatar
     wb = openpyxl.load_workbook(FILE_OUTPUT)
     
-    for sheet_name in ['Medições', 'PROBLEMAS']:
+    # Define colunas por aba
+    cols_medicoes = [c for c in ordered_columns if c != "FISCAL"]
+    cols_problemas = list(ordered_columns)
+
+    sheet_configs = {
+        'Medições': cols_medicoes,
+        'PROBLEMAS': cols_problemas
+    }
+
+    for sheet_name, sheet_cols in sheet_configs.items():
         if sheet_name in wb.sheetnames:
             ws = wb[sheet_name]
             apply_sheet_formatting(ws, 
-                                   col_map={c: i+1 for i, c in enumerate(ordered_columns)}, 
-                                   header=ordered_columns, 
-                                   all_months=[], # Não usado mais na nova lógica de formatação interna
+                                   col_map={c: i+1 for i, c in enumerate(sheet_cols)}, 
+                                   header=sheet_cols, 
+                                   all_months=[], 
                                    model_widths=model_widths, 
                                    model_header_style=model_header_style,
                                    h_vlr_contr="VLR.CONTRATO C/ADITIVO", 
