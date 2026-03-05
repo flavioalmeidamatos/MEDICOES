@@ -335,11 +335,11 @@ def apply_sheet_formatting(ws, col_map, header, all_months, model_widths, model_
                         val_clean = str(cell_val.value).replace('R$', '').replace(' ', '') # type: ignore
                         if ',' in val_clean and '.' not in val_clean:
                             val_clean = val_clean.replace(',', '.')
-                        cell.value = float(round(float(val_clean), 2)) # type: ignore
+                        cell_val.value = float(round(float(val_clean), 2)) # type: ignore
                     else:
-                        cell.value = 0.0
+                        cell_val.value = 0.0
                 except:
-                    cell.value = 0.0
+                    cell_val.value = 0.0
 
         # Formatação de Datas
         for dc in [h_inicio, "DATA FINAL", "Prazo Final", "Ordem de Início"]:
