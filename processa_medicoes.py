@@ -84,7 +84,7 @@ def get_comissoes_data():
     aux_sheet = next((s for s in xl.sheet_names if s.upper() == "AUXILIAR"), None)
     if aux_sheet:
         df_aux = pd.read_excel(FILE_COMISSOES, sheet_name=aux_sheet)
-        df_aux.columns = [str(c).upper().strip() for c in df_aux.columns]
+        df_aux.columns = [str(c).replace("\n", " ").upper().strip() for c in df_aux.columns]
         if 'SEI' in df_aux.columns:
             for _, row in df_aux.iterrows():
                 sei = clean_sei(row['SEI'])
@@ -182,21 +182,33 @@ def get_gestor_fiscal_data():
             
             # Percorre o arquivo buscando blocos de dados (SEI e GESTOR)
             for i in range(len(df_ctrl_raw)): # type: ignore
-                row_vals = [str(v).strip().upper() for v in df_ctrl_raw.iloc[i].fillna("").astype(str)] # type: ignore
+                # Limpa novos nomes de colunas (remove \n e espaços extras)
+                row_vals = [str(v).replace("\n", " ").strip().upper() for v in df_ctrl_raw.iloc[i].fillna("").astype(str)] # type: ignore
                 if "SEI" in row_vals and any("GESTOR" in v for v in row_vals):
                     # Achou cabeçalho
                     cols = {v: idx for idx, v in enumerate(row_vals) if v}
                     
+                    # Identifica índices exatos para evitar fallback para 0 (SEI)
+                    sei_idx = cols.get("SEI")
+                    gestor_idx = None
+                    for gk in ["GESTOR(A) ATUANTE", "GESTOR ATUANTE", "GESTOR(A)", "GESTOR"]:
+                        if gk in cols:
+                            gestor_idx = cols[gk]
+                            break
+                    
+                    if sei_idx is None or gestor_idx is None:
+                        continue
+
                     # Processa linhas abaixo até encontrar vazio
                     for j in range(i + 1, len(df_ctrl_raw)):
                         d_row = df_ctrl_raw.iloc[j]
-                        sei_orig = str(d_row[cols.get("SEI", 0)]).strip()
+                        sei_orig = str(d_row[sei_idx]).strip()
                         sei = clean_sei(sei_orig)
                         if not sei or sei.upper() == "NAN" or "TOTAL" in sei.upper():
                             if not sei_orig or sei_orig.upper() == "NAN": break
                             else: continue
                         
-                        gestor = str(d_row[cols.get("GESTOR(A) ATUANTE", cols.get("GESTOR", 0))]).strip()
+                        gestor = str(d_row[gestor_idx]).strip()
                         fiscal = ""
                         for fk in ["FISCAL NOMEADO", "FISCAL", "FISCAL(A)"]:
                             if fk in cols:
