@@ -527,7 +527,7 @@ def main():
         dados = {
             "SEI": row['Processo SEI'],
             "LOCAL": info['local'],
-            "STATUS": info.get('status_aux') if info.get('status_aux') else str(row['Fase']).strip().upper(),
+            "STATUS": str(row['Fase']).strip().upper() if pd.notna(row.get('Fase')) and str(row['Fase']).strip() else info.get('status_aux', ''),
             "GESTOR": info['gestor'],
             "FISCAL": info.get('fiscal', ''),
             "MUNICIPIO": row['Municipio'],
