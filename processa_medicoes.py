@@ -76,6 +76,19 @@ def get_contractor_mapping():
                 mapping[orig] = res
     return mapping
 
+def get_concluidas_sei() -> Any:
+    # Lê AUXILIAR.xlsx para obter lista de SEIs que devem ser tratados como CONCLUÍDOS
+    # (Tabela "CONCLUIDAS" mencionada - coluna SEI no arquivo AUXILIAR)
+    try:
+        df_aux = pd.read_excel(FILE_AUXILIAR, sheet_name="AUXILIAR")
+        if 'SEI' in df_aux.columns:
+            # Pega todos os SEIs da coluna, limpa e retorna como um set
+            concluidas = df_aux['SEI'].dropna().apply(clean_sei).unique()
+            return set(concluidas)
+    except Exception as e:
+        print(f"Erro ao ler SEIs concluídos de AUXILIAR.xlsx: {e}")
+    return set()
+
 def get_comissoes_data():
     xl = pd.ExcelFile(FILE_COMISSOES)
     data = {}
@@ -475,6 +488,7 @@ def main():
     region_map = get_region_mapping()
     comissoes_map = get_gestor_fiscal_data() # Agora unificado
     contractor_map = get_contractor_mapping()
+    concluidas_sei: Any = get_concluidas_sei() # Novos SEIs para mover para PROBLEMAS
 
     # 3. Carregar DADOS
     df_ana = pd.read_excel(FILE_ANALITICA)
@@ -536,10 +550,18 @@ def main():
         info = comissoes_map.get(sei, {'gestor': '', 'local': 'CIVIS', 'status_aux': ''})
         
         # Dados básicos
+        fase_original = str(row['Fase']).strip().upper() if pd.notna(row.get('Fase')) and str(row['Fase']).strip() else info.get('status_aux', '')
+        
+        # Se o SEI estiver na lista de CONCLUIDAS do arquivo AUXILIAR, força o status
+        if sei in concluidas_sei:
+            status_final = "CONCLUÍDA"
+        else:
+            status_final = fase_original
+
         dados = {
             "SEI": row['Processo SEI'],
             "LOCAL": info['local'],
-            "STATUS": str(row['Fase']).strip().upper() if pd.notna(row.get('Fase')) and str(row['Fase']).strip() else info.get('status_aux', ''),
+            "STATUS": status_final,
             "GESTOR": info['gestor'],
             "FISCAL": info.get('fiscal', ''),
             "MUNICIPIO": row['Municipio'],
@@ -561,6 +583,7 @@ def main():
         vlr_contr = to_numeric(row['Valor contrato (Atual)'])
         dados["VLR.CONTRATO C/ADITIVO"] = vlr_contr
 
+        df_pivot_cols: Any = df_pivot.columns # type: ignore
         med_acumulada: float = 0.0
         med_2025: float = 0.0
         med_2026: float = 0.0
@@ -571,7 +594,7 @@ def main():
             col_clean = str(col_name).replace(" ", "")
             
             # Se a coluna existe no pivot, puxa o valor
-            if col_clean in df_pivot.columns: # type: ignore
+            if col_clean in df_pivot_cols:
                 val_raw = df_pivot.loc[sei, col_clean] if sei in df_pivot.index else 0.0 # type: ignore
                 val: float = float(val_raw)
                 dados[col_name] = float(round(val, 2)) # type: ignore
