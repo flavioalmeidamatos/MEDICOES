@@ -406,12 +406,19 @@ def apply_sheet_formatting(ws, col_map, header, all_months, model_widths, model_
         ws.column_dimensions[column_letter].width = width
 
 
-def prepare_dataframe(df, status_filter='EXECUÇÃO', keep_execution=True):
-    """Filtra, ordena e numera o DataFrame conforme o status desejado."""
+def prepare_dataframe(df, status_filter=['EXECUÇÃO', 'ATA DE REGISTRO'], keep_execution=True):
+    """Filtra, ordena e numera o DataFrame conforme os status desejados."""
+    # Garante que status_filter seja uma lista
+    if isinstance(status_filter, str):
+        status_filter = [status_filter]
+    
+    # Garante que a coluna STATUS seja tratada como string para evitar erros de tipo
+    status_col = df['STATUS'].astype(str)
+    
     if keep_execution:
-        df_filtered = df[df['STATUS'] == status_filter].copy()
+        df_filtered = df[status_col.isin(status_filter)].copy()
     else:
-        df_filtered = df[df['STATUS'] != status_filter].copy()
+        df_filtered = df[~status_col.isin(status_filter)].copy()
 
     # Remover duplicatas residuais
     df_filtered = df_filtered.drop_duplicates(subset=['SEI']).copy()
