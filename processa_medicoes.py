@@ -1,3 +1,4 @@
+from typing import Any # type: ignore
 import pandas as pd # type: ignore
 import openpyxl # type: ignore
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side # type: ignore
@@ -91,11 +92,11 @@ def get_comissoes_data():
                 # Tenta ler gestor da AUXILIAR como fallback inicial
                 gestor_aux = ""
                 for col_g in ['GESTOR(A) ATUANTE', 'GESTOR(A)', 'GESTOR']:
-                    if col_g in df_aux.columns and pd.notna(row.get(col_g)):
-                        gestor_aux = str(row[col_g]).strip()
+                    if col_g in df_aux.columns and pd.notna(row.get(col_g)): # type: ignore
+                        gestor_aux = str(row[col_g]).strip() # type: ignore
                         break
-                status_val = str(row['STATUS']).replace('#', '').strip().upper() if 'STATUS' in df_aux.columns and pd.notna(row.get('STATUS')) else ""
-                local_val  = str(row['LOCAL']).strip().upper() if 'LOCAL' in df_aux.columns and pd.notna(row.get('LOCAL')) else "CIVIS"
+                status_val = str(row['STATUS']).replace('#', '').strip().upper() if 'STATUS' in df_aux.columns and pd.notna(row.get('STATUS')) else "" # type: ignore
+                local_val  = str(row['LOCAL']).strip().upper() if 'LOCAL' in df_aux.columns and pd.notna(row.get('LOCAL')) else "CIVIS" # type: ignore
                 data[sei] = {
                     'gestor': gestor_aux,
                     'status_aux': status_val,
@@ -159,9 +160,9 @@ def get_comissoes_data():
             else:
                 # Já existia (da AUXILIAR): atualiza LOCAL e SOBRESCREVE gestor
                 # com o GESTOR(A) ATUANTE da aba regional — fonte mais confiável
-                data[sei]['local'] = local_val
+                data[sei]['local'] = local_val # type: ignore
                 if gestor_regional:
-                    data[sei]['gestor'] = gestor_regional
+                    data[sei]['gestor'] = gestor_regional # type: ignore
 
     return data
 
@@ -207,12 +208,12 @@ def get_gestor_fiscal_data():
                             status_val = str(d_row[cols["STATUS"]]).strip().upper().replace("#", "")
 
                         if sei not in data:
-                            data[sei] = {'gestor': gestor, 'fiscal': fiscal, 'local': 'CIVIS', 'status_aux': status_val}
+                            data[sei] = {'gestor': gestor, 'fiscal': fiscal, 'local': 'CIVIS', 'status_aux': status_val} # type: ignore
                         else:
                             # Prioriza dados do arquivo de CONTROLES se preenchidos
-                            if gestor and gestor.upper() != "NAN": data[sei]['gestor'] = gestor
-                            if fiscal and fiscal.upper() != "NAN": data[sei]['fiscal'] = fiscal
-                            if status_val: data[sei]['status_aux'] = status_val
+                            if gestor and gestor.upper() != "NAN": data[sei]['gestor'] = gestor # type: ignore
+                            if fiscal and fiscal.upper() != "NAN": data[sei]['fiscal'] = fiscal # type: ignore
+                            if status_val: data[sei]['status_aux'] = status_val # type: ignore
         except Exception as e:
             print(f"Erro ao ler arquivo de controles: {e}")
 
@@ -269,17 +270,15 @@ def apply_sheet_formatting(ws, col_map, header, all_months, model_widths, model_
 
     # Data content
     money_fmt = '_-R$ * #,##0.00_-;_-R$ * -#,##0.00_-;_-R$ * "-"??_-;_-@_-'
-    # Utilizar as colunas que foram passadas como "all_months" ou colunas financeiras
-    # Mas aqui precisamos saber quais sao financeiras.
-    # Vamos inferir: tudo que é mês, valor, saldo.
+    ws_any: Any = ws
     
-    for row in range(2, ws.max_row + 1):
+    for row in range(2, ws_any.max_row + 1):
         for col in range(1, len(header) + 1):
-            ws.cell(row=row, column=col).border = thin_border
+            ws_any.cell(row=row, column=col).border = thin_border
 
         # Formatação LOCAL
         if "LOCAL" in col_map:
-            local_cell = ws.cell(row=row, column=col_map["LOCAL"])
+            local_cell = ws_any.cell(row=row, column=col_map["LOCAL"])
             local_val = str(local_cell.value).strip().upper()
             if local_val in fills_local:
                 local_cell.fill = fills_local[local_val]
@@ -287,9 +286,9 @@ def apply_sheet_formatting(ws, col_map, header, all_months, model_widths, model_
 
         # Formatação REGIÃO
         if "REGIÃO" in col_map:
-            reg_val = ws.cell(row=row, column=col_map["REGIÃO"]).value
+            reg_val = ws_any.cell(row=row, column=col_map["REGIÃO"]).value
             if reg_val in fills_regiao:
-                ws.cell(row=row, column=col_map["REGIÃO"]).fill = fills_regiao[reg_val]
+                ws_any.cell(row=row, column=col_map["REGIÃO"]).fill = fills_regiao[reg_val]
 
         # Formatação Financeira (heurística + lista passada)
         # Se o nome da coluna estiver em all_months ou contiver VLR, SALDO, MEDIÇÕES (exceto ano solto)
@@ -304,11 +303,11 @@ def apply_sheet_formatting(ws, col_map, header, all_months, model_widths, model_
                 is_money = True
             
             if is_money:
-                cell = ws.cell(row=row, column=col_idx)
-                cell.number_format = money_fmt
+                cell_val: Any = ws_any.cell(row=row, column=col_idx) # type: ignore
+                cell_val.number_format = money_fmt # type: ignore
                 try:
-                    if cell.value is not None:
-                        val_clean = str(cell.value).replace('R$', '').replace(' ', '')
+                    if cell_val.value is not None: # type: ignore
+                        val_clean = str(cell_val.value).replace('R$', '').replace(' ', '') # type: ignore
                         if ',' in val_clean and '.' not in val_clean:
                             val_clean = val_clean.replace(',', '.')
                         cell.value = float(round(float(val_clean), 2)) # type: ignore
@@ -320,12 +319,12 @@ def apply_sheet_formatting(ws, col_map, header, all_months, model_widths, model_
         # Formatação de Datas
         for dc in [h_inicio, "DATA FINAL", "Prazo Final", "Ordem de Início"]:
             if dc in col_map:
-                cell = ws.cell(row=row, column=col_map[dc])
-                if cell.value:
-                    cell.number_format = 'DD/MM/YYYY'
+                cell_dt: Any = ws_any.cell(row=row, column=col_map[dc]) # type: ignore
+                if cell_dt.value: # type: ignore
+                    cell_dt.number_format = 'DD/MM/YYYY' # type: ignore
         
         if "% EXEC." in col_map:
-            ws.cell(row=row, column=col_map["% EXEC."]).number_format = '0.00%'
+            ws_any.cell(row=row, column=col_map["% EXEC."]).number_format = '0.00%' # type: ignore
 
     # --- Aplicação de Larguras ---
     for col in ws.columns:
@@ -496,8 +495,8 @@ def main():
             ano_val = int(float(str(r['Ano'])))
             ano_s = str(ano_val)
         except:
-            ano_s = str(r['Ano'])
-        suffix = ano_s[-2:] if len(ano_s) >= 2 else ano_s
+            ano_s = str(r['Ano']) # type: ignore
+        suffix = ano_s[-2:] if len(ano_s) >= 2 else ano_s # type: ignore
         mes_raw = r['Mês']
         mes_str = "JAN"
         if pd.notna(mes_raw):
@@ -568,11 +567,11 @@ def main():
                 if "/25" in str(col_clean):
                     # Verifica se é coluna de mês para somar no MEDIÇÕES 2025
                     if re.match(r'^[A-Z]{3}/\d{2}$', str(col_clean)):
-                        med_2025 += val
+                        med_2025 += val # type: ignore
                 elif "/26" in str(col_clean):
                     # Verifica se é coluna de mês para somar no MEDIÇÕES 2026
                     if re.match(r'^[A-Z]{3}/\d{2}$', str(col_clean)):
-                        med_2026 += val
+                        med_2026 += val # type: ignore
             elif col_name not in dados:
                  # Coluna do modelo que não é dado básico e não está no pivot
                  pass
@@ -586,20 +585,20 @@ def main():
         # Montar linha final ordenada
         linha_ordenada = {}
         for col in ordered_columns:
-            val = dados.get(col)
+            val_out = dados.get(col)
             
             # Fallback de Nomes
-            if val is None:
-                if "PRAZO" in col and "EXECUÇÃO" in col: val = dados.get("PRAZO EXECUÇÃO")
-                elif "ORDEM" in col and "INÍCIO" in col: val = dados.get("ORDEM DE INÍCIO")
-                elif "VLR" in col and "CONTRATO" in col: val = dados.get("VLR.CONTRATO C/ADITIVO")
-                elif "MEDIÇÕES" in col and "ACUMULADAS" in col: val = dados.get("MEDIÇÕES ACUMULADAS")
-                elif "MEDIÇÕES" in col and "2025" in col: val = dados.get("MEDIÇÕES 2025")
-                elif "MEDIÇÕES" in col and "2026" in col: val = dados.get("MEDIÇÕES 2026")
-                elif "SALDO" in col and "CONTRATO" in col: val = dados.get("SALDO DO CONTRATO")
-                elif "%" in col and "EXEC" in col: val = dados.get("% EXEC.")
+            if val_out is None:
+                if "PRAZO" in col and "EXECUÇÃO" in col: val_out = dados.get("PRAZO EXECUÇÃO")
+                elif "ORDEM" in col and "INÍCIO" in col: val_out = dados.get("ORDEM DE INÍCIO")
+                elif "VLR" in col and "CONTRATO" in col: val_out = dados.get("VLR.CONTRATO C/ADITIVO")
+                elif "MEDIÇÕES" in col and "ACUMULADAS" in col: val_out = dados.get("MEDIÇÕES ACUMULADAS")
+                elif "MEDIÇÕES" in col and "2025" in col: val_out = dados.get("MEDIÇÕES 2025")
+                elif "MEDIÇÕES" in col and "2026" in col: val_out = dados.get("MEDIÇÕES 2026")
+                elif "SALDO" in col and "CONTRATO" in col: val_out = dados.get("SALDO DO CONTRATO")
+                elif "%" in col and "EXEC" in col: val_out = dados.get("% EXEC.")
             
-            linha_ordenada[col] = val if val is not None else ""
+            linha_ordenada[col] = val_out if val_out is not None else ""
             
         final_rows.append(linha_ordenada)
 
