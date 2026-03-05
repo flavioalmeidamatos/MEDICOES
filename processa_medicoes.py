@@ -12,6 +12,7 @@ FILE_BASE = os.path.join(CWD, "BASE.xlsx")
 FILE_ANALITICA = os.path.join(CWD, "ANALITICA.xlsx")
 FILE_AUXILIAR = os.path.join(CWD, "AUXILIAR.xlsx")
 FILE_COMISSOES = os.path.join(CWD, "COMISSÕES POR REGIAO.xlsx")
+FILE_CONTROLES = os.path.join(CWD, "CONTROLES POR COMISSÃO E GESTORES.xlsx")
 FILE_OUTPUT = os.path.join(CWD, "MEDIÇÕES_CONSOLIDADO.xlsx")
 
 def clean_sei(val):
@@ -29,7 +30,8 @@ def to_numeric(val):
     elif "," in s:
         s = s.replace(",", ".")
     try:
-        return round(float(s), 2)
+        f_val = float(s)
+        return float(round(f_val, 2))
     except:
         return 0.0
 
@@ -163,6 +165,59 @@ def get_comissoes_data():
 
     return data
 
+def get_gestor_fiscal_data():
+    """Unifica dados de GESTOR e FISCAL dos dois arquivos de controles/comissões."""
+    # 1. Dados do COMISSÕES POR REGIAO.xlsx (Fonte tradicional)
+    data = get_comissoes_data()
+    # Adiciona fiscal inicial vazio
+    for sei in data:
+        data[sei]['fiscal'] = ""
+
+    # 2. Dados do CONTROLES POR COMISSÃO E GESTORES.xlsx (Fonte mais atualizada/detalhada)
+    if os.path.exists(FILE_CONTROLES):
+        try:
+            # Lê todas as tabelas ou o sheet Planilha1
+            df_ctrl_raw = pd.read_excel(FILE_CONTROLES, header=None)
+            
+            # Percorre o arquivo buscando blocos de dados (SEI e GESTOR)
+            for i in range(len(df_ctrl_raw)):
+                row_vals = [str(v).strip().upper() for v in df_ctrl_raw.iloc[i].fillna("").astype(str)]
+                if "SEI" in row_vals and any("GESTOR" in v for v in row_vals):
+                    # Achou cabeçalho
+                    cols = {v: idx for idx, v in enumerate(row_vals) if v}
+                    
+                    # Processa linhas abaixo até encontrar vazio
+                    for j in range(i + 1, len(df_ctrl_raw)):
+                        d_row = df_ctrl_raw.iloc[j]
+                        sei_orig = str(d_row[cols.get("SEI", 0)]).strip()
+                        sei = clean_sei(sei_orig)
+                        if not sei or sei.upper() == "NAN" or "TOTAL" in sei.upper():
+                            if not sei_orig or sei_orig.upper() == "NAN": break
+                            else: continue
+                        
+                        gestor = str(d_row[cols.get("GESTOR(A) ATUANTE", cols.get("GESTOR", 0))]).strip()
+                        fiscal = ""
+                        for fk in ["FISCAL NOMEADO", "FISCAL", "FISCAL(A)"]:
+                            if fk in cols:
+                                fiscal = str(d_row[cols[fk]]).strip()
+                                break
+                        
+                        status_val = ""
+                        if "STATUS" in cols:
+                            status_val = str(d_row[cols["STATUS"]]).strip().upper().replace("#", "")
+
+                        if sei not in data:
+                            data[sei] = {'gestor': gestor, 'fiscal': fiscal, 'local': 'CIVIS', 'status_aux': status_val}
+                        else:
+                            # Prioriza dados do arquivo de CONTROLES se preenchidos
+                            if gestor and gestor.upper() != "NAN": data[sei]['gestor'] = gestor
+                            if fiscal and fiscal.upper() != "NAN": data[sei]['fiscal'] = fiscal
+                            if status_val: data[sei]['status_aux'] = status_val
+        except Exception as e:
+            print(f"Erro ao ler arquivo de controles: {e}")
+
+    return data
+
 def apply_sheet_formatting(ws, col_map, header, all_months, model_widths, model_header_style,
                            h_vlr_contr, h_med_acum, h_saldo, h_inicio):
     """Aplica formatação idêntica (cabeçalhos, cores, bordas, larguras) a uma worksheet."""
@@ -256,7 +311,7 @@ def apply_sheet_formatting(ws, col_map, header, all_months, model_widths, model_
                         val_clean = str(cell.value).replace('R$', '').replace(' ', '')
                         if ',' in val_clean and '.' not in val_clean:
                             val_clean = val_clean.replace(',', '.')
-                        cell.value = round(float(val_clean), 2)
+                        cell.value = float(round(float(val_clean), 2))
                     else:
                         cell.value = 0.0
                 except:
@@ -307,6 +362,8 @@ def apply_sheet_formatting(ws, col_map, header, all_months, model_widths, model_
             width = 18
         elif val_header == "GESTOR":
             width = 19
+        elif val_header == "FISCAL":
+            width = 25
         elif val_header == "MEDIÇÕES 2025":
             width = 18
         elif val_header == "MEDIÇÕES 2026":
@@ -381,6 +438,15 @@ def get_model_structure():
     except Exception as e:
         print(f"Erro ao ler modelo: {e}")
         return [], {}, {}
+    
+    # Adicionar FISCAL se não houver no modelo (após GESTOR)
+    if "GESTOR" in ordered_columns and "FISCAL" not in ordered_columns:
+        idx = ordered_columns.index("GESTOR")
+        ordered_columns.insert(idx + 1, "FISCAL")
+        model_widths["FISCAL"] = 25
+        # Copia estilo do GESTOR
+        if "GESTOR" in model_header_style:
+            model_header_style["FISCAL"] = model_header_style["GESTOR"].copy()
         
     return ordered_columns, model_widths, model_header_style
 
@@ -396,7 +462,7 @@ def main():
 
     # 2. Carregar mapeamentos
     region_map = get_region_mapping()
-    comissoes_map = get_comissoes_data()
+    comissoes_map = get_gestor_fiscal_data() # Agora unificado
     contractor_map = get_contractor_mapping()
 
     # 3. Carregar DADOS
@@ -464,6 +530,7 @@ def main():
             "LOCAL": info['local'],
             "STATUS": info.get('status_aux') if info.get('status_aux') else str(row['Fase']).strip().upper(),
             "GESTOR": info['gestor'],
+            "FISCAL": info.get('fiscal', ''),
             "MUNICIPIO": row['Municipio'],
             "REGIÃO": region_map.get(str(row['Municipio']).strip().upper(), ""),
             "CONTRATADA": contractor_map.get(normalize_name(str(row['Contratada'])), str(row['Contratada']).strip())
@@ -494,27 +561,26 @@ def main():
             
             # Se a coluna existe no pivot, puxa o valor
             if col_clean in df_pivot.columns:
-                val = df_pivot.loc[sei, col_clean] if sei in df_pivot.index else 0.0
-                dados[col_name] = round(val, 2)
+                val = float(df_pivot.loc[sei, col_clean]) if sei in df_pivot.index else 0.0
+                dados[col_name] = float(round(val, 2))
                 med_acumulada += val
-                if "/25" in col_clean:
+                if "/25" in str(col_clean):
                     # Verifica se é coluna de mês para somar no MEDIÇÕES 2025
-                    if re.match(r'^[A-Z]{3}/\d{2}$', col_clean):
+                    if re.match(r'^[A-Z]{3}/\d{2}$', str(col_clean)):
                         med_2025 += val
-                elif "/26" in col_clean:
+                elif "/26" in str(col_clean):
                     # Verifica se é coluna de mês para somar no MEDIÇÕES 2026
-                    if re.match(r'^[A-Z]{3}/\d{2}$', col_clean):
+                    if re.match(r'^[A-Z]{3}/\d{2}$', str(col_clean)):
                         med_2026 += val
             elif col_name not in dados:
-                 # Coluna do modelo que não é dado básico e não está no pivot (ex: mês futuro ou coluna calculada)
-                 # Se for mês futuro (ex: JAN/26) e não tem no pivot, é 0.
+                 # Coluna do modelo que não é dado básico e não está no pivot
                  pass
 
-        dados["MEDIÇÕES ACUMULADAS"] = round(med_acumulada, 2)
-        dados["MEDIÇÕES 2025"] = round(med_2025, 2)
-        dados["MEDIÇÕES 2026"] = round(med_2026, 2)
-        dados["SALDO DO CONTRATO"] = round(vlr_contr - med_acumulada, 2)
-        dados["% EXEC."] = (med_acumulada / vlr_contr) if vlr_contr > 0 else 0.0
+        dados["MEDIÇÕES ACUMULADAS"] = float(round(med_acumulada, 2))
+        dados["MEDIÇÕES 2025"] = float(round(med_2025, 2))
+        dados["MEDIÇÕES 2026"] = float(round(med_2026, 2))
+        dados["SALDO DO CONTRATO"] = float(round(vlr_contr - med_acumulada, 2))
+        dados["% EXEC."] = float(med_acumulada / vlr_contr) if vlr_contr > 0 else 0.0
 
         # Montar linha final ordenada
         linha_ordenada = {}
