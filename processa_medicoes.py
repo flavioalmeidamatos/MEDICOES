@@ -588,9 +588,17 @@ def main():
         # Financeiro
         vlr_contr = to_numeric(row['Valor contrato (Atual)'])
         dados["VLR.CONTRATO C/ADITIVO"] = vlr_contr
+        
+        # Novas fontes do ANALITICA.xlsx conforme pedido do usuário
+        # "MEDIÇÕES ACUMULADAS" vem de "Valor contrato (Atual)"
+        # "% EXEC" vem de "Acumulado atual (%)"
+        # "SALDO DO CONTRATO" vem de "Saldo Atual do Contrato"
+        vlr_acum_ana = to_numeric(row['Valor contrato (Atual)'])
+        perc_exec_ana = to_numeric(row['Acumulado atual (%)'])
+        saldo_ana = to_numeric(row['Saldo Atual do Contrato'])
 
         df_pivot_cols: Any = df_pivot.columns # type: ignore
-        med_acumulada: float = 0.0
+        med_acum_calc: float = 0.0 # Valor calculado das mensais para conferência interna
         med_2025: float = 0.0
         med_2026: float = 0.0
         
@@ -604,7 +612,7 @@ def main():
                 val_raw = df_pivot.loc[sei, col_clean] if sei in df_pivot.index else 0.0 # type: ignore
                 val: float = float(val_raw)
                 dados[col_name] = float(round(val, 2)) # type: ignore
-                med_acumulada += val
+                med_acum_calc += val
                 if "/25" in str(col_clean):
                     # Verifica se é coluna de mês para somar no MEDIÇÕES 2025
                     if re.match(r'^[A-Z]{3}/\d{2}$', str(col_clean)):
@@ -617,11 +625,12 @@ def main():
                  # Coluna do modelo que não é dado básico e não está no pivot
                  pass
 
-        dados["MEDIÇÕES ACUMULADAS"] = float(round(med_acumulada, 2)) # type: ignore
+        # Atribui conforme nova regra (ANALITICA.xlsx)
+        dados["MEDIÇÕES ACUMULADAS"] = vlr_acum_ana
         dados["MEDIÇÕES 2025"] = float(round(med_2025, 2)) # type: ignore
         dados["MEDIÇÕES 2026"] = float(round(med_2026, 2)) # type: ignore
-        dados["SALDO DO CONTRATO"] = float(round(float(vlr_contr) - med_acumulada, 2)) # type: ignore
-        dados["% EXEC."] = float(med_acumulada / float(vlr_contr)) if vlr_contr > 0 else 0.0
+        dados["SALDO DO CONTRATO"] = saldo_ana
+        dados["% EXEC."] = perc_exec_ana
 
         # Montar linha final ordenada
         linha_ordenada = {}
