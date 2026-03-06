@@ -556,8 +556,10 @@ def main():
         # Dados básicos
         fase_original = str(row['Fase']).strip().upper() if pd.notna(row.get('Fase')) and str(row['Fase']).strip() else info.get('status_aux', '')
         
-        # Se o SEI estiver na lista de CONCLUIDAS do arquivo AUXILIAR, força o status
-        if sei in concluidas_sei:
+        # Exceções: Força status "EXECUÇÃO" para o SEI solicitado
+        if sei == "330018/000567/2021":
+            status_final = "EXECUÇÃO"
+        elif sei in concluidas_sei:
             status_final = "CONCLUÍDA"
         else:
             status_final = fase_original
