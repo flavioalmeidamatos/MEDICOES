@@ -626,11 +626,15 @@ def main():
                  pass
 
         # Atribui conforme nova regra (ANALITICA.xlsx)
-        dados["MEDIÇÕES ACUMULADAS"] = vlr_acum_ana
+        dados["% EXEC."] = perc_exec_ana
+        # Se % EXEC. for zero, não exibir o conteúdo de MEDIÇÕES ACUMULADAS
+        if perc_exec_ana == 0 or perc_exec_ana == 0.0:
+            dados["MEDIÇÕES ACUMULADAS"] = ""
+        else:
+            dados["MEDIÇÕES ACUMULADAS"] = vlr_acum_ana
         dados["MEDIÇÕES 2025"] = float(round(med_2025, 2)) # type: ignore
         dados["MEDIÇÕES 2026"] = float(round(med_2026, 2)) # type: ignore
         dados["SALDO DO CONTRATO"] = saldo_ana
-        dados["% EXEC."] = perc_exec_ana
 
         # Montar linha final ordenada
         linha_ordenada = {}
