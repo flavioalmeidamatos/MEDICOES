@@ -8,7 +8,8 @@ import os
 import re
 
 # Caminhos dos arquivos
-CWD = r"d:\APRENDIZADO APP\MEDICOES"
+# Usa o diretório do próprio script para funcionar tanto no Windows quanto aqui.
+CWD = os.path.dirname(os.path.abspath(__file__))
 FILE_BASE = os.path.join(CWD, "BASE.xlsx")
 FILE_ANALITICA = os.path.join(CWD, "ANALITICA.xlsx")
 FILE_AUXILIAR = os.path.join(CWD, "AUXILIAR.xlsx")
