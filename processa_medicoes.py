@@ -6,6 +6,7 @@ from openpyxl.utils import get_column_letter # type: ignore
 from datetime import datetime
 import os
 import re
+import warnings
 
 # Caminhos dos arquivos
 # Usa o diretório do próprio script para funcionar tanto no Windows quanto aqui.
@@ -16,6 +17,20 @@ FILE_AUXILIAR = os.path.join(CWD, "AUXILIAR.xlsx")
 FILE_COMISSOES = os.path.join(CWD, "COMISSÕES POR REGIAO.xlsx")
 FILE_CONTROLES = os.path.join(CWD, "CONTROLES POR COMISSÃO E GESTORES.xlsx")
 FILE_OUTPUT = os.path.join(CWD, "MEDIÇÕES_CONSOLIDADO.xlsx")
+
+HEADER_FOOTER_WARNING = "Cannot parse header or footer so it will be ignored"
+
+
+def read_excel_ignoring_header_footer_warning(*args, **kwargs):
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=HEADER_FOOTER_WARNING)
+        return pd.read_excel(*args, **kwargs)
+
+
+def load_workbook_ignoring_header_footer_warning(*args, **kwargs):
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=HEADER_FOOTER_WARNING)
+        return openpyxl.load_workbook(*args, **kwargs)
 
 def clean_sei(val):
     if pd.isna(val): return ""
@@ -192,7 +207,7 @@ def get_gestor_fiscal_data():
     if os.path.exists(FILE_CONTROLES):
         try:
             # Lê todas as tabelas ou o sheet Planilha1
-            df_ctrl_raw = pd.read_excel(FILE_CONTROLES, header=None)
+            df_ctrl_raw = read_excel_ignoring_header_footer_warning(FILE_CONTROLES, header=None)
             
             # Percorre o arquivo buscando blocos de dados (SEI e GESTOR)
             for i in range(len(df_ctrl_raw)): # type: ignore
@@ -444,7 +459,7 @@ def get_model_structure():
     ordered_columns = []
     
     try:
-        wb_mod = openpyxl.load_workbook(model_path, data_only=False)
+        wb_mod = load_workbook_ignoring_header_footer_warning(model_path, data_only=False)
         ws_mod = wb_mod['Medições']
         
         # Ler cabeçalhos da linha 2
